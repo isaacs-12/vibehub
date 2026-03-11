@@ -41,7 +41,9 @@ export default function CodePeek() {
               <pre className="px-3 py-2 text-xs font-mono text-gray-300 overflow-x-auto whitespace-pre leading-relaxed">
                 {f.content.slice(0, 3000)}
                 {f.content.length > 3000 && (
-                  <span className="text-muted italic">\n… truncated</span>
+                  <span className="text-muted italic block mt-1">
+                    … preview (first 3,000 of {f.content.length.toLocaleString()} characters — full file on disk)
+                  </span>
                 )}
               </pre>
             </div>

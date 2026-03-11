@@ -135,11 +135,12 @@ dev: .env
 	$(NPM) run dev --workspace=packages/web
 
 # Tauri must run natively — it compiles a native binary + opens a window
-# Free port 1420 if a previous desktop dev run is still holding it
+# Free port 1420 if a previous desktop dev run is still holding it.
+# Loads .env so GEMINI_API_KEY (and others) are available to the desktop app.
 desktop: .env
 	@lsof -ti:1420 | xargs kill -9 2>/dev/null || true
 	@echo "  Starting Vibe Studio (native Tauri)…"
-	$(NPM) run tauri dev --workspace=packages/desktop
+	@set -a && . ./.env && set +a && $(NPM) run tauri dev --workspace=packages/desktop
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 .PHONY: build build-cli build-web

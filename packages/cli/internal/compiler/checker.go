@@ -14,7 +14,7 @@ import (
 	"google.golang.org/api/option"
 )
 
-const checkerModel = "gemini-1.5-flash"
+const checkerModel = "gemini-2.5-flash-lite"
 const maxCheckerChars = 6_000
 
 func runRequirementsCheck(

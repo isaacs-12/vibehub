@@ -21,12 +21,18 @@ export function useVibeProject() {
     }));
     setFeatures(features);
 
-    // Load git state
+    // Load git state; if not a repo, init and retry
     try {
       const git = await invoke<{ branch: string; branches: string[] }>('get_git_state', { root });
       setGitBranch(git.branch, git.branches);
     } catch {
-      setGitBranch('main', ['main']);
+      try {
+        await invoke('git_init', { root });
+        const git = await invoke<{ branch: string; branches: string[] }>('get_git_state', { root });
+        setGitBranch(git.branch, git.branches);
+      } catch {
+        setGitBranch('main', ['main']);
+      }
     }
   }, [setProjectRoot, setFeatures, setGitBranch]);
 

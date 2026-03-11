@@ -45,6 +45,11 @@ interface VibeStore {
   currentBranch: string;
   branches: string[];
 
+  // Run output (in-app terminal)
+  runOutputLines: Array<{ line: string; stderr?: boolean }>;
+  runOutputVisible: boolean;
+  runInProgress: boolean;
+
   // Actions
   setProjectRoot: (root: string) => void;
   setFeatures: (features: FeatureNode[]) => void;
@@ -59,6 +64,10 @@ interface VibeStore {
   setActiveChat: (id: string | null) => void;
   deleteChat: (id: string) => void;
   setGitBranch: (branch: string, branches: string[]) => void;
+  appendRunOutput: (line: string, stderr?: boolean) => void;
+  clearRunOutput: () => void;
+  setRunOutputVisible: (visible: boolean) => void;
+  setRunInProgress: (inProgress: boolean) => void;
 }
 
 const initialSession = createSession('Chat 1');
@@ -75,6 +84,9 @@ export const useVibeStore = create<VibeStore>((set, get) => ({
   chatOpen: false,
   currentBranch: 'main',
   branches: [],
+  runOutputLines: [],
+  runOutputVisible: true,
+  runInProgress: false,
 
   setProjectRoot: (root) => set({ projectRoot: root }),
   setFeatures: (features) => set({ features }),
@@ -145,4 +157,9 @@ export const useVibeStore = create<VibeStore>((set, get) => ({
       return { chatSessions: sessions, activeChatId: nextActive };
     }),
   setGitBranch: (branch, branches) => set({ currentBranch: branch, branches }),
+  appendRunOutput: (line, stderr) =>
+    set((s) => ({ runOutputLines: [...s.runOutputLines, { line, stderr }] })),
+  clearRunOutput: () => set({ runOutputLines: [] }),
+  setRunOutputVisible: (visible) => set({ runOutputVisible: visible }),
+  setRunInProgress: (inProgress) => set({ runInProgress: inProgress }),
 }));

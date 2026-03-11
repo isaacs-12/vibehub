@@ -1,11 +1,12 @@
-import React from 'react';
-import { Zap, MessageSquare, FolderOpen } from 'lucide-react';
+import React, { useState } from 'react';
+import { Zap, MessageSquare, FolderOpen, Loader2, Play, Code2 } from 'lucide-react';
 import { useVibeStore } from '../../store/index.ts';
 import { useVibeProject } from '../../hooks/useVibeProject.ts';
 
 export default function TopBar() {
-  const { setChatOpen, chatOpen, isDirty, selectedFeature, saveFeature } = useVibeStore();
+  const { setChatOpen, chatOpen, isDirty, selectedFeature, saveFeature, projectRoot, setCodePeekFiles, clearRunOutput, setRunOutputVisible, codePeekVisible, toggleCodePeek, runInProgress, setRunInProgress } = useVibeStore();
   const { openProject } = useVibeProject();
+  const [vibeLoading, setVibeLoading] = useState(false);
 
   async function handleOpenProject() {
     try {
@@ -24,14 +25,56 @@ export default function TopBar() {
     }
   }
 
+  async function handleRun() {
+    if (!projectRoot) {
+      const { message } = await import('@tauri-apps/plugin-dialog');
+      await message('Open a project first.', { title: 'Run', kind: 'info' });
+      return;
+    }
+    clearRunOutput();
+    setRunOutputVisible(true);
+    setRunInProgress(true);
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('run_project', { root: projectRoot });
+    } catch (err) {
+      setRunInProgress(false);
+      const { message } = await import('@tauri-apps/plugin-dialog');
+      await message(String(err), { title: 'Run', kind: 'error' });
+    }
+  }
+
   async function handleVibeCompile() {
-    const { invoke } = await import('@tauri-apps/api/core');
-    const { projectRoot } = useVibeStore.getState();
-    if (!projectRoot) return;
-    // Save current file first
-    await saveFeature();
-    // Trigger the Vibe→Code AI compilation
-    await invoke('compile_vibes', { root: projectRoot });
+    if (!projectRoot) {
+      const { message } = await import('@tauri-apps/plugin-dialog');
+      await message('Open a project first (Open Project in the top bar).', { title: 'Vibe', kind: 'info' });
+      return;
+    }
+    setVibeLoading(true);
+    try {
+      await saveFeature();
+      const { invoke } = await import('@tauri-apps/api/core');
+      const { message } = await import('@tauri-apps/plugin-dialog');
+      const result = await invoke<string>('compile_vibes', { root: projectRoot });
+      await message(result ?? 'Done.', { title: 'Vibe', kind: 'info' });
+      // Refresh Code Peek so generated files show up
+      if (selectedFeature?.path) {
+        try {
+          const files = await invoke<Array<{ path: string; content: string }>>('get_mapped_code', {
+            root: projectRoot,
+            featurePath: selectedFeature.path,
+          });
+          setCodePeekFiles(files ?? []);
+        } catch {
+          setCodePeekFiles([]);
+        }
+      }
+    } catch (err) {
+      const { message } = await import('@tauri-apps/plugin-dialog');
+      await message(String(err), { title: 'Vibe', kind: 'error' });
+    } finally {
+      setVibeLoading(false);
+    }
   }
 
   return (
@@ -60,8 +103,29 @@ export default function TopBar() {
         )}
       </div>
 
-      {/* Right: Chat + Vibe compile */}
+      {/* Right: Code Peek + Run + Chat + Vibe compile */}
       <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => toggleCodePeek()}
+          className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border transition-colors ${
+            codePeekVisible
+              ? 'border-accent bg-accent/20 text-accent-light'
+              : 'border-surface-border text-muted hover:text-gray-200 hover:border-gray-500'
+          }`}
+          title={codePeekVisible ? 'Hide Code Peek' : 'Show Code Peek'}
+        >
+          <Code2 size={12} />
+          Code
+        </button>
+        <button
+          onClick={handleRun}
+          disabled={runInProgress}
+          className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-surface-border text-muted hover:text-gray-200 hover:border-gray-500 disabled:opacity-50 transition-colors"
+        >
+          <Play size={12} />
+          {runInProgress ? 'Running…' : 'Run'}
+        </button>
         <button
           onClick={() => setChatOpen(!chatOpen)}
           className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border transition-colors ${
@@ -75,9 +139,10 @@ export default function TopBar() {
         </button>
         <button
           onClick={handleVibeCompile}
-          className="flex items-center gap-1.5 text-xs px-3 py-1 rounded bg-accent hover:bg-accent/80 text-white font-medium transition-colors"
+          disabled={vibeLoading}
+          className="flex items-center gap-1.5 text-xs px-3 py-1 rounded bg-accent hover:bg-accent/80 disabled:opacity-60 text-white font-medium transition-colors"
         >
-          <Zap size={12} />
+          {vibeLoading ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
           Vibe
         </button>
       </div>

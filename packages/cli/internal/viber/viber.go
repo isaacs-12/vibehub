@@ -16,7 +16,7 @@ import (
 	"google.golang.org/api/option"
 )
 
-const geminiModel = "gemini-1.5-flash"
+const geminiModel = "gemini-2.5-flash-lite"
 
 type Viber struct{ apiKey string }
 

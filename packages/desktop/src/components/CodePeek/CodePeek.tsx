@@ -1,9 +1,10 @@
-import React, { useEffect } from 'react';
-import { X, Code2 } from 'lucide-react';
+import React, { useEffect, useState, useCallback } from 'react';
+import { X, Code2, ChevronDown, ChevronRight } from 'lucide-react';
 import { useVibeStore } from '../../store/index.ts';
 
 export default function CodePeek() {
   const { selectedFeature, codePeekFiles, setCodePeekFiles, toggleCodePeek, projectRoot } = useVibeStore();
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!selectedFeature || !projectRoot) {
@@ -12,6 +13,27 @@ export default function CodePeek() {
     }
     loadMappedFiles(selectedFeature.path, projectRoot, setCodePeekFiles);
   }, [selectedFeature, projectRoot]);
+
+  useEffect(() => {
+    if (codePeekFiles.length > 0) {
+      setExpandedPaths((prev) => {
+        const next = new Set(prev);
+        codePeekFiles.forEach((f) => next.add(f.path));
+        return next;
+      });
+    } else {
+      setExpandedPaths(new Set());
+    }
+  }, [codePeekFiles]);
+
+  const toggleFile = useCallback((path: string) => {
+    setExpandedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }, []);
 
   return (
     <div className="flex flex-col h-full">
@@ -33,21 +55,35 @@ export default function CodePeek() {
               : 'Select a feature to see its mapped code.'}
           </div>
         ) : (
-          codePeekFiles.map((f) => (
-            <div key={f.path} className="border-b border-surface-border">
-              <div className="px-3 py-1.5 bg-surface-overlay text-xs text-muted font-mono truncate">
-                {f.path}
-              </div>
-              <pre className="px-3 py-2 text-xs font-mono text-gray-300 overflow-x-auto whitespace-pre leading-relaxed">
-                {f.content.slice(0, 3000)}
-                {f.content.length > 3000 && (
-                  <span className="text-muted italic block mt-1">
-                    … preview (first 3,000 of {f.content.length.toLocaleString()} characters — full file on disk)
-                  </span>
+          codePeekFiles.map((f) => {
+            const isExpanded = expandedPaths.has(f.path);
+            return (
+              <div key={f.path} className="border-b border-surface-border">
+                <button
+                  type="button"
+                  onClick={() => toggleFile(f.path)}
+                  className="w-full flex items-center gap-1.5 px-3 py-1.5 bg-surface-overlay text-xs text-muted font-mono text-left hover:bg-surface-raised transition-colors"
+                >
+                  {isExpanded ? (
+                    <ChevronDown size={12} className="shrink-0" />
+                  ) : (
+                    <ChevronRight size={12} className="shrink-0" />
+                  )}
+                  <span className="truncate">{f.path}</span>
+                </button>
+                {isExpanded && (
+                  <pre className="px-3 py-2 text-xs font-mono text-gray-300 overflow-x-auto whitespace-pre leading-relaxed">
+                    {f.content.slice(0, 3000)}
+                    {f.content.length > 3000 && (
+                      <span className="text-muted italic block mt-1">
+                        … preview (first 3,000 of {f.content.length.toLocaleString()} characters — full file on disk)
+                      </span>
+                    )}
+                  </pre>
                 )}
-              </pre>
-            </div>
-          ))
+              </div>
+            );
+          })
         )}
       </div>
     </div>

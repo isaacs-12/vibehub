@@ -84,7 +84,16 @@ interface FileData {
 }
 
 function dataFilePath(): string {
-  const dir = process.env.VIBEHUB_DATA_DIR ?? path.join(os.homedir(), '.vibehub');
+  let dir: string;
+  if (process.env.VIBEHUB_DATA_DIR) {
+    dir = process.env.VIBEHUB_DATA_DIR;
+  } else {
+    try {
+      dir = path.join(os.homedir(), '.vibehub');
+    } catch {
+      dir = path.join(process.cwd(), '.vibehub-data');
+    }
+  }
   fs.mkdirSync(dir, { recursive: true });
   return path.join(dir, 'data.json');
 }

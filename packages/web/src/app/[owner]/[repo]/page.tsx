@@ -1,7 +1,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { GitBranch, GitPullRequest, Settings, Zap, Plus } from 'lucide-react';
+import { GitBranch, GitPullRequest, Settings, Zap, Plus, FolderOpen } from 'lucide-react';
 import { getStore } from '@/lib/data/store';
 import FeatureMap from '@/components/FeatureMap/FeatureMap';
 import VibeCoverage from '@/components/VibeCoverage/VibeCoverage';
@@ -100,6 +100,21 @@ export default async function ProjectDashboard({ params }: Props) {
 
         {/* Stats sidebar (1/3) */}
         <div className="space-y-4">
+          {/* Open locally */}
+          <div className="bg-canvas-subtle border border-border rounded-lg overflow-hidden">
+            <div className="px-4 py-3 border-b border-border flex items-center gap-2 text-sm font-semibold text-fg">
+              <FolderOpen size={14} className="text-accent-emphasis" />
+              Open locally
+            </div>
+            <div className="px-4 py-3 text-xs text-fg-muted space-y-2">
+              <p>To edit in <strong className="text-fg">Vibe Studio</strong> (desktop), clone then open the folder:</p>
+              <pre className="bg-canvas border border-border rounded p-2 text-accent-emphasis font-mono text-[11px] overflow-x-auto">
+                vibe clone {owner}/{repo}
+              </pre>
+              <p className="text-fg-subtle">Creates <code className="bg-canvas px-1 rounded">{owner}-{repo}/</code> with a <code className="bg-canvas px-1 rounded">.vibe/</code> directory. In Vibe Studio use <strong className="text-fg">Open Project</strong> → select that folder.</p>
+            </div>
+          </div>
+
           <VibeCoverage
             coverage={features.length > 0 ? Math.round((features.length / Math.max(features.length, 10)) * 100) : 0}
             totalFiles={Math.max(features.length, 10)}

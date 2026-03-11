@@ -51,6 +51,8 @@ help:
 	@echo ""
 	@echo "  $(CYAN)CLI (vibe)$(RESET)"
 	@echo "    make vibe-init      Run: vibe init in current dir"
+	@echo "    make vibe-clone     Run: vibe clone owner/repo (creates dir + .vibe/)"
+	@echo "    make vibe-install   Add vibe to PATH in ~/.zshrc so you can run vibe from anywhere"
 	@echo "    make vibe-read      Run: vibe read in current dir"
 	@echo "    make vibe-import    Run: vibe import --repo . (needs GEMINI_API_KEY)"
 	@echo "    make vibe-compile   Codegen + typecheck + tests + AI requirements review"
@@ -141,11 +143,22 @@ desktop: .env
 
 # ── Build ─────────────────────────────────────────────────────────────────────
 .PHONY: build build-cli build-web
+VIBE_BIN_DIR := $(abspath $(CURDIR)/packages/cli/dist)
+
 build: build-cli build-web
 
 build-cli:
 	cd packages/cli && go build -o dist/vibe .
 	@echo "  $(GREEN)✔ CLI built$(RESET)  (packages/cli/dist/vibe)"
+	@if grep -q "vibehub vibe CLI" ~/.zshrc 2>/dev/null; then \
+		:; \
+	else \
+		echo "" >> ~/.zshrc; \
+		echo "# vibehub vibe CLI (added by make build-cli)" >> ~/.zshrc; \
+		echo "export PATH=\"$(VIBE_BIN_DIR):\$$PATH\"" >> ~/.zshrc; \
+		echo "  $(GREEN)✔ Added vibe to PATH$(RESET) in ~/.zshrc"; \
+	fi
+	@echo "  To use \`vibe\` in this terminal now:  export PATH=\"$(VIBE_BIN_DIR):$$PATH\""
 
 build-web:
 	$(NPM) run build --workspace=packages/web
@@ -164,9 +177,17 @@ db-psql:
 	$(DC) exec postgres psql -U vibehub vibehub
 
 # ── CLI (vibe) ────────────────────────────────────────────────────────────────
-.PHONY: vibe-init vibe-read vibe-import vibe-compile vibe-check
+.PHONY: vibe-init vibe-clone vibe-install vibe-read vibe-import vibe-compile vibe-check
+
 vibe-init: build-cli
 	packages/cli/dist/vibe init
+
+vibe-clone: build-cli
+	@test -n "$(owner)" && test -n "$(repo)" || { echo "  Usage: make vibe-clone owner=ims repo=test"; exit 1; }
+	packages/cli/dist/vibe clone $(owner)/$(repo)
+
+vibe-install: build-cli
+	@echo "  PATH already updated by build-cli; run \`vibe\` in a new terminal (or eval the export from ~/.zshrc)."
 
 vibe-read: build-cli
 	packages/cli/dist/vibe read

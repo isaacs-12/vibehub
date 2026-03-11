@@ -1,0 +1,67 @@
+repos:
+  # ── Standard file hygiene ────────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+        exclude: tsconfig.*\.json$   # tsconfig allows comments via JSONC
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  # ── TypeScript typecheck (CLI) ────────────────────────────────────────────────
+  - repo: local
+    hooks:
+      - id: tsc-cli
+        name: TypeScript (CLI)
+        language: node
+        entry: bash -c 'npx tsc --noEmit --project packages/cli/tsconfig.json'
+        pass_filenames: false
+        files: ^packages/cli/src/.*\.tsx?$
+        types: [file]
+
+      - id: tsc-web
+        name: TypeScript (Web)
+        language: node
+        entry: bash -c 'npx tsc --noEmit --project packages/web/tsconfig.json'
+        pass_filenames: false
+        files: ^packages/web/src/.*\.tsx?$
+        types: [file]
+
+  # ── Vibe mapping consistency ───────────────────────────────────────────────
+  - repo: local
+    hooks:
+      - id: vibe-mapping-check
+        name: Vibe mapping.json consistency
+        language: node
+        entry: node -e "
+          const fs = require('fs');
+          const path = require('path');
+          const mapPath = '.vibe/mapping.json';
+          if (!fs.existsSync(mapPath)) { console.log('No mapping.json — skipping'); process.exit(0); }
+          const mapping = JSON.parse(fs.readFileSync(mapPath,'utf8'));
+          const featDir = '.vibe/features';
+          if (!fs.existsSync(featDir)) { console.log('No features dir — skipping'); process.exit(0); }
+          const features = fs.readdirSync(featDir).filter(f => f.endsWith('.md')).map(f => 'features/' + f);
+          const unmapped = features.filter(f => !mapping[f]);
+          if (unmapped.length) {
+            console.error('Unmapped features (add entries to .vibe/mapping.json):');
+            unmapped.forEach(f => console.error(' -', f));
+            process.exit(1);
+          }
+          console.log('All', features.length, 'features are mapped.');
+        "
+        pass_filenames: false
+        files: ^\.vibe/
+
+  # ── Secret detection ──────────────────────────────────────────────────────────
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks

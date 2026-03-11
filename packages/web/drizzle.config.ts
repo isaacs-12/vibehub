@@ -5,6 +5,6 @@ export default {
   out: './drizzle',
   dialect: 'postgresql',
   dbCredentials: {
-    url: process.env.DATABASE_URL ?? 'postgresql://localhost:5432/vibehub',
+    url: process.env.DATABASE_URL ?? 'postgresql://vibehub:vibehub@localhost:5433/vibehub',
   },
 } satisfies Config;

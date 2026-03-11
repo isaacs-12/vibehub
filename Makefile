@@ -27,10 +27,12 @@ help:
 	@echo "    make install        Install Node deps for all packages"
 	@echo "    make venv           Create Python venv + install requirements.txt"
 	@echo ""
-	@echo "  $(CYAN)Docker / Infrastructure$(RESET)"
+	@echo "  $(CYAN)Docker / Infrastructure (local stack)$(RESET)"
 	@echo "    make up             Start postgres + localstack + web (docker)"
-	@echo "    make down           Stop all containers"
-	@echo "    make restart        down + up"
+	@echo "    make down           Stop and remove all containers (frees ports)"
+	@echo "    make local-up       Same as up — start local stack"
+	@echo "    make local-down     Same as down — stop local stack, free ports"
+	@echo "    make restart        down + up (use if ports were in use)"
 	@echo "    make logs           Tail logs from all services"
 	@echo "    make ps             Show running containers"
 	@echo "    make nuke           Stop containers AND delete volumes (destructive!)"
@@ -67,7 +69,7 @@ setup: .env install venv up db-push
 	@echo ""
 	@echo "  $(GREEN)✔ Setup complete!$(RESET)"
 	@echo "  Web:       http://localhost:3000"
-	@echo "  Postgres:  localhost:5432  (user: vibehub  pass: vibehub)"
+	@echo "  Postgres:  localhost:5433  (user: vibehub  pass: vibehub)"
 	@echo "  LocalStack: http://localhost:4566"
 	@echo ""
 
@@ -92,16 +94,21 @@ $(VENV)/bin/activate: requirements.txt
 	$(PIP) install -r requirements.txt --quiet
 	@echo "  $(GREEN)✔ Python venv ready$(RESET)  (activate: source $(VENV)/bin/activate)"
 
-# ── Docker / Infra ────────────────────────────────────────────────────────────
-.PHONY: up down restart logs ps nuke
-up:
+# ── Docker / Infra (local stack) ─────────────────────────────────────────────
+.PHONY: up down local-up local-down restart logs ps nuke
+up: local-up
+
+down: local-down
+
+local-up:
 	$(DC) up -d --build
-	@echo "  $(GREEN)✔ Services running$(RESET)"
+	@echo "  $(GREEN)✔ Local stack up$(RESET)  (postgres, localstack, web)"
 
-down:
-	$(DC) down
+local-down:
+	$(DC) down --remove-orphans
+	@echo "  $(GREEN)✔ Local stack down$(RESET)  (ports 5433, 4566, 3000 freed)"
 
-restart: down up
+restart: local-down local-up
 
 logs:
 	$(DC) logs -f
@@ -124,7 +131,9 @@ dev: .env
 	$(NPM) run dev --workspace=packages/web
 
 # Tauri must run natively — it compiles a native binary + opens a window
+# Free port 1420 if a previous desktop dev run is still holding it
 desktop: .env
+	@lsof -ti:1420 | xargs kill -9 2>/dev/null || true
 	@echo "  Starting Vibe Studio (native Tauri)…"
 	$(NPM) run tauri dev --workspace=packages/desktop
 

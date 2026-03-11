@@ -480,13 +480,19 @@ pub async fn git_checkout(root: String, branch: String) -> Result<(), String> {
 }
 
 /// Create initial commit if repo has no commits (unborn), so branch operations work.
+/// If HEAD is unborn but refs/heads/main or refs/heads/master already has a commit, just point HEAD at it.
 fn ensure_initial_commit(repo: &git2::Repository) -> Result<(), String> {
-    let has_commit = repo
-        .head()
-        .and_then(|h| h.peel_to_commit())
-        .is_ok();
-    if has_commit {
+    if repo.head().and_then(|h| h.peel_to_commit()).is_ok() {
         return Ok(());
+    }
+    // HEAD is unborn; maybe refs/heads/main or refs/heads/master already has a commit (e.g. from a previous run).
+    for branch_ref in ["refs/heads/main", "refs/heads/master"] {
+        if let Ok(r) = repo.find_reference(branch_ref) {
+            if r.peel_to_commit().is_ok() {
+                repo.set_head(branch_ref).map_err(|e| e.to_string())?;
+                return Ok(());
+            }
+        }
     }
     let sig = git2::Signature::now("Vibe Studio", "vibe@local").map_err(|e| e.to_string())?;
     let tree_id = repo.treebuilder(None).map_err(|e| e.to_string())?.write().map_err(|e| e.to_string())?;
@@ -601,6 +607,30 @@ fn read_mapped_files(root: &std::path::Path, globs: &[String]) -> Vec<(String, S
     out
 }
 
+/// Detect preferred output language from vibe spec text (e.g. "python only", "written in python", "in TypeScript").
+/// Returns (file_extension, language_instruction for prompt).
+fn preferred_language_from_vibe(content: &str) -> (&'static str, &'static str) {
+    let lower = content.to_lowercase();
+    if lower.contains("python only") || lower.contains("written in python") || lower.contains("in python")
+        || (lower.contains("python") && lower.contains("only"))
+    {
+        return ("py", "The specification requests Python. Generate only Python code and use a .py file.");
+    }
+    if lower.contains("python") {
+        return ("py", "The specification requests Python. Generate only Python code and use a .py file.");
+    }
+    if lower.contains("golang") || lower.contains(" in go ") || lower.contains("written in go") {
+        return ("go", "The specification requests Go. Generate only Go code and use a .go file.");
+    }
+    if lower.contains("rust") && (lower.contains("language") || lower.contains("written") || lower.contains("in rust") || lower.contains("only")) {
+        return ("rs", "The specification requests Rust. Generate only Rust code and use a .rs file.");
+    }
+    if lower.contains("typescript") || lower.contains("javascript") {
+        return ("ts", "Use TypeScript or JavaScript as appropriate.");
+    }
+    ("ts", "Use TypeScript or the language that fits the spec.")
+}
+
 fn parse_codegen_response(text: &str) -> Result<Vec<(String, String)>, String> {
     let text = text
         .trim()
@@ -685,14 +715,17 @@ pub async fn compile_vibes(root: String) -> Result<String, String> {
 
         let existing = read_mapped_files(&root_path, &globs);
 
+        let (ext, lang_instruction) = preferred_language_from_vibe(content);
+
         let prompt = if existing.is_empty() {
             let base_dir = globs[0].trim_end_matches('/').trim_end_matches("/**");
             let base_dir = if base_dir.is_empty() { "src" } else { base_dir };
             let suggested_path = format!("{}/{}", base_dir, if name.is_empty() { "index" } else { name });
-            let suggested_path = format!("{}.ts", suggested_path.trim_end_matches('.'));
+            let suggested_path = format!("{}.{}", suggested_path.trim_end_matches('.'), ext);
             format!(
                 r#"You are a senior software engineer. Create NEW code (one file) that implements this specification.
 There is no existing code yet — generate an initial implementation.
+{}.
 
 ## Vibe Specification
 ```markdown
@@ -701,7 +734,8 @@ There is no existing code yet — generate an initial implementation.
 
 Respond with ONLY a valid JSON array with exactly one object:
 [{{"filePath":"{}","content":"<full file content>"}}]
-Use the exact filePath above. Use TypeScript or the language that fits the spec. No markdown fences."#,
+Use the exact filePath above. No markdown fences."#,
+                lang_instruction,
                 content,
                 suggested_path
             )
@@ -712,6 +746,7 @@ Use the exact filePath above. Use TypeScript or the language that fits the spec.
                 .collect();
             format!(
                 r#"You are a senior software engineer. Update the existing code to implement this specification.
+{}.
 
 ## Vibe Specification
 ```markdown
@@ -724,6 +759,7 @@ Use the exact filePath above. Use TypeScript or the language that fits the spec.
 Respond with ONLY a valid JSON array:
 [{{"filePath":"<exact path>","content":"<full updated file content>"}}]
 Return [] if no changes needed. No markdown fences."#,
+                lang_instruction,
                 content,
                 files_block
             )

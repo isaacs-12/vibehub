@@ -1,0 +1,5 @@
+# Python dev tooling for VibeHub
+# Set up with: make venv
+pre-commit==3.7.1
+awscli-local==0.22.0       # awslocal CLI — talks to LocalStack
+httpie==3.2.3               # handy for testing the web API

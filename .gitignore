@@ -3,3 +3,18 @@ dist/
 *.db
 .env
 .env.*
+
+# Python venv
+.venv/
+__pycache__/
+*.pyc
+
+# Next.js
+.next/
+out/
+
+# Tauri
+src-tauri/target/
+
+# LocalStack
+.localstack/

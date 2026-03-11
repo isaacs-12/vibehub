@@ -79,7 +79,7 @@ services:
     volumes:
       - .:/workspace:delegated
     working_dir: /workspace
-    entrypoint: ["node", "/app/packages/cli/dist/cli.js"]
+    entrypoint: ["vibe"]
     command: ["--help"]
 
 volumes:

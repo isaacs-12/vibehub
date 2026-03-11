@@ -53,6 +53,8 @@ help:
 	@echo "    make vibe-init      Run: vibe init in current dir"
 	@echo "    make vibe-read      Run: vibe read in current dir"
 	@echo "    make vibe-import    Run: vibe import --repo . (needs GEMINI_API_KEY)"
+	@echo "    make vibe-compile   Codegen + typecheck + tests + AI requirements review"
+	@echo "    make vibe-check     Validate existing code only (no generation, safe for CI)"
 	@echo ""
 	@echo "  $(CYAN)S3 / LocalStack$(RESET)"
 	@echo "    make s3-ls          List vibehub-artifacts bucket contents"
@@ -142,7 +144,8 @@ desktop: .env
 build: build-cli build-web
 
 build-cli:
-	$(NPM) run build --workspace=packages/cli
+	cd packages/cli && go build -o dist/vibe .
+	@echo "  $(GREEN)✔ CLI built$(RESET)  (packages/cli/dist/vibe)"
 
 build-web:
 	$(NPM) run build --workspace=packages/web
@@ -161,16 +164,30 @@ db-psql:
 	$(DC) exec postgres psql -U vibehub vibehub
 
 # ── CLI (vibe) ────────────────────────────────────────────────────────────────
-.PHONY: vibe-init vibe-read vibe-import
+.PHONY: vibe-init vibe-read vibe-import vibe-compile vibe-check
 vibe-init: build-cli
-	node packages/cli/dist/cli.js init
+	packages/cli/dist/vibe init
 
 vibe-read: build-cli
-	node packages/cli/dist/cli.js read
+	packages/cli/dist/vibe read
 
 vibe-import: build-cli
 	@$(call require-env, GEMINI_API_KEY)
-	node packages/cli/dist/cli.js import --repo . --api-key $$GEMINI_API_KEY
+	packages/cli/dist/vibe import --repo . --api-key $$GEMINI_API_KEY
+
+# Full compile: codegen + typecheck + tests + AI requirements review
+vibe-compile: build-cli
+	@$(call require-env, GEMINI_API_KEY)
+	packages/cli/dist/vibe compile --dir . --api-key $$GEMINI_API_KEY
+
+# Check-only: validate existing code without generating anything (safe for CI)
+vibe-check: build-cli
+	@$(call require-env, GEMINI_API_KEY)
+	packages/cli/dist/vibe compile --dir . --check --api-key $$GEMINI_API_KEY
+
+go-tidy:
+	@command -v go >/dev/null 2>&1 || { echo "  Go not found (install from https://go.dev/dl or skip go-tidy)."; exit 0; }
+	cd packages/cli && go mod tidy
 
 # ── S3 / LocalStack ───────────────────────────────────────────────────────────
 .PHONY: s3-ls s3-create

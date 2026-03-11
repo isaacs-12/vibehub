@@ -14,6 +14,16 @@ export interface ChatMessage {
   vibeContext?: string;   // which vibe file was active
 }
 
+export interface ChatSession {
+  id: string;
+  title: string;         // e.g. "Chat 1" or first message preview
+  messages: ChatMessage[];
+}
+
+function createSession(title = 'New chat'): ChatSession {
+  return { id: crypto.randomUUID(), title, messages: [] };
+}
+
 interface VibeStore {
   // Project
   projectRoot: string | null;
@@ -26,8 +36,9 @@ interface VibeStore {
   codePeekVisible: boolean;
   codePeekFiles: Array<{ path: string; content: string }>;
 
-  // Chat
-  chatMessages: ChatMessage[];
+  // Chat (multiple sessions)
+  chatSessions: ChatSession[];
+  activeChatId: string | null;
   chatOpen: boolean;
 
   // Git
@@ -44,9 +55,13 @@ interface VibeStore {
   setCodePeekFiles: (files: Array<{ path: string; content: string }>) => void;
   appendChatMessage: (msg: ChatMessage) => void;
   setChatOpen: (open: boolean) => void;
+  createChat: () => void;
+  setActiveChat: (id: string | null) => void;
+  deleteChat: (id: string) => void;
   setGitBranch: (branch: string, branches: string[]) => void;
 }
 
+const initialSession = createSession('Chat 1');
 export const useVibeStore = create<VibeStore>((set, get) => ({
   projectRoot: null,
   features: [],
@@ -55,7 +70,8 @@ export const useVibeStore = create<VibeStore>((set, get) => ({
   isDirty: false,
   codePeekVisible: true,
   codePeekFiles: [],
-  chatMessages: [],
+  chatSessions: [initialSession],
+  activeChatId: initialSession.id,
   chatOpen: false,
   currentBranch: 'main',
   branches: [],
@@ -88,7 +104,45 @@ export const useVibeStore = create<VibeStore>((set, get) => ({
 
   toggleCodePeek: () => set((s) => ({ codePeekVisible: !s.codePeekVisible })),
   setCodePeekFiles: (files) => set({ codePeekFiles: files }),
-  appendChatMessage: (msg) => set((s) => ({ chatMessages: [...s.chatMessages, msg] })),
+  appendChatMessage: (msg) =>
+    set((s) => {
+      const aid = s.activeChatId ?? s.chatSessions[0]?.id;
+      if (!aid) {
+        const newSession = createSession('Chat 1');
+        newSession.messages.push(msg);
+        return { chatSessions: [newSession], activeChatId: newSession.id };
+      }
+      const sessions = s.chatSessions.map((c) =>
+        c.id === aid ? { ...c, messages: [...c.messages, msg] } : c,
+      );
+      // Optionally set title from first user message
+      const updated = sessions.find((c) => c.id === aid);
+      if (updated && msg.role === 'user' && updated.messages.length === 1) {
+        const title = msg.content.slice(0, 32).trim() + (msg.content.length > 32 ? '…' : '');
+        return {
+          chatSessions: sessions.map((c) => (c.id === aid ? { ...c, title } : c)),
+        };
+      }
+      return { chatSessions: sessions };
+    }),
   setChatOpen: (open) => set({ chatOpen: open }),
+  createChat: () =>
+    set((s) => {
+      const newSession = createSession(`Chat ${s.chatSessions.length + 1}`);
+      return {
+        chatSessions: [...s.chatSessions, newSession],
+        activeChatId: newSession.id,
+      };
+    }),
+  setActiveChat: (id) => set({ activeChatId: id }),
+  deleteChat: (id) =>
+    set((s) => {
+      const sessions = s.chatSessions.filter((c) => c.id !== id);
+      const nextActive =
+        s.activeChatId === id
+          ? sessions[0]?.id ?? null
+          : s.activeChatId;
+      return { chatSessions: sessions, activeChatId: nextActive };
+    }),
   setGitBranch: (branch, branches) => set({ currentBranch: branch, branches }),
 }));

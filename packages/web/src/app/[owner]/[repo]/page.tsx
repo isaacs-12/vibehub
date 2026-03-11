@@ -1,32 +1,36 @@
 import React from 'react';
 import Link from 'next/link';
-import { GitBranch, GitPullRequest, Settings, Zap } from 'lucide-react';
+import { notFound } from 'next/navigation';
+import { GitBranch, GitPullRequest, Settings, Zap, Plus } from 'lucide-react';
+import { getStore } from '@/lib/data/store';
 import FeatureMap from '@/components/FeatureMap/FeatureMap';
 import VibeCoverage from '@/components/VibeCoverage/VibeCoverage';
+import type { FeatureNode } from '@/components/FeatureMap/FeatureMap';
 
 interface Props {
   params: { owner: string; repo: string };
 }
 
-// Demo data — replace with DB queries via getProjectData(owner, repo)
-const DEMO_FEATURES = [
-  { id: 'auth', label: 'Authentication', children: [
-    { id: 'oauth', label: 'OAuth2 / SSO', children: [] },
-    { id: 'session', label: 'Session Mgmt', children: [] },
-  ]},
-  { id: 'billing', label: 'Billing', children: [
-    { id: 'stripe', label: 'Stripe Integration', children: [] },
-    { id: 'invoices', label: 'Invoices', children: [] },
-  ]},
-  { id: 'api', label: 'Public API', children: [
-    { id: 'rest', label: 'REST Endpoints', children: [] },
-    { id: 'webhooks', label: 'Webhooks', children: [] },
-  ]},
-  { id: 'infra', label: 'Infrastructure', children: [] },
-];
-
-export default function ProjectDashboard({ params }: Props) {
+export default async function ProjectDashboard({ params }: Props) {
   const { owner, repo } = params;
+  const store = getStore();
+
+  const project = await store.getProject(owner, repo);
+  if (!project) notFound();
+
+  const [features, prs] = await Promise.all([
+    store.listFeatures(project.id),
+    store.listPRs(project.id),
+  ]);
+
+  // Map flat features to the tree shape FeatureMap expects
+  const featureNodes: FeatureNode[] = features.map((f) => ({
+    id: f.id,
+    label: f.name,
+    children: [],
+  }));
+
+  const recentPRs = prs.slice(0, 5);
 
   return (
     <div className="mx-auto max-w-screen-xl px-4 py-8">
@@ -38,10 +42,9 @@ export default function ProjectDashboard({ params }: Props) {
             <span className="mx-1">/</span>
             <span className="text-fg font-semibold">{repo}</span>
           </div>
-          <div className="flex items-center gap-2 text-xs text-fg-muted">
-            <GitBranch size={12} />
-            <span>main</span>
-          </div>
+          {project.description && (
+            <p className="text-sm text-fg-muted">{project.description}</p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <Link
@@ -50,6 +53,11 @@ export default function ProjectDashboard({ params }: Props) {
           >
             <GitPullRequest size={14} />
             Vibe PRs
+            {prs.length > 0 && (
+              <span className="ml-1 bg-canvas text-fg-muted border border-border rounded-full px-1.5 text-xs">
+                {prs.filter((p) => p.status === 'open').length}
+              </span>
+            )}
           </Link>
           <Link
             href={`/${owner}/${repo}/settings`}
@@ -70,39 +78,65 @@ export default function ProjectDashboard({ params }: Props) {
               <Zap size={14} className="text-accent-emphasis" />
               Feature Map
             </div>
-            <span className="text-xs text-fg-muted">{DEMO_FEATURES.length} top-level features</span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-fg-muted">{featureNodes.length} features</span>
+            </div>
           </div>
-          <div className="h-96">
-            <FeatureMap features={DEMO_FEATURES} />
-          </div>
+
+          {featureNodes.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-64 text-center gap-3 p-6">
+              <div className="text-5xl opacity-20">◈</div>
+              <p className="text-sm text-fg-muted">No features yet.</p>
+              <p className="text-xs text-fg-subtle max-w-xs">
+                Run <code className="bg-canvas text-accent-emphasis px-1 rounded">vibe import --repo .</code> to extract features from your codebase, or add them manually.
+              </p>
+            </div>
+          ) : (
+            <div className="h-96">
+              <FeatureMap features={featureNodes} />
+            </div>
+          )}
         </div>
 
         {/* Stats sidebar (1/3) */}
         <div className="space-y-4">
-          <VibeCoverage coverage={64} totalFiles={120} mappedFiles={77} />
-          <RecentActivity owner={owner} repo={repo} />
-        </div>
-      </div>
-    </div>
-  );
-}
+          <VibeCoverage
+            coverage={features.length > 0 ? Math.round((features.length / Math.max(features.length, 10)) * 100) : 0}
+            totalFiles={Math.max(features.length, 10)}
+            mappedFiles={features.length}
+          />
 
-function RecentActivity({ owner, repo }: { owner: string; repo: string }) {
-  const activity = [
-    { type: 'vibe_pr', title: 'Add Google Login to Auth vibe', time: '2h ago', id: '42' },
-    { type: 'import', title: 'Imported 8 features from git history', time: '1d ago', id: '41' },
-    { type: 'vibe_pr', title: 'Refactor billing to support multi-currency', time: '3d ago', id: '40' },
-  ];
-  return (
-    <div className="bg-canvas-subtle border border-border rounded-lg overflow-hidden">
-      <div className="px-4 py-3 border-b border-border text-sm font-semibold text-fg">Recent Activity</div>
-      <div className="divide-y divide-border">
-        {activity.map((a) => (
-          <Link key={a.id} href={`/${owner}/${repo}/pulls/${a.id}`} className="block px-4 py-2.5 hover:bg-canvas-inset transition-colors">
-            <div className="text-xs text-fg line-clamp-1">{a.title}</div>
-            <div className="text-xs text-fg-muted mt-0.5">{a.time}</div>
-          </Link>
-        ))}
+          {/* Recent PRs */}
+          <div className="bg-canvas-subtle border border-border rounded-lg overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+              <span className="text-sm font-semibold text-fg">Vibe PRs</span>
+              <Link
+                href={`/${owner}/${repo}/pulls/new`}
+                className="text-xs text-accent-emphasis hover:underline flex items-center gap-1"
+              >
+                <Plus size={11} /> New
+              </Link>
+            </div>
+            {recentPRs.length === 0 ? (
+              <div className="px-4 py-4 text-xs text-fg-muted text-center">No pull requests yet.</div>
+            ) : (
+              <div className="divide-y divide-border">
+                {recentPRs.map((pr) => (
+                  <Link
+                    key={pr.id}
+                    href={`/${owner}/${repo}/pulls/${pr.id}`}
+                    className="block px-4 py-2.5 hover:bg-canvas-inset transition-colors"
+                  >
+                    <div className="text-xs text-fg line-clamp-1">{pr.title}</div>
+                    <div className="text-xs text-fg-muted mt-0.5">
+                      #{pr.id.slice(0, 8)} · {pr.author} · {pr.status}
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

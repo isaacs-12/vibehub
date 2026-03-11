@@ -2,6 +2,7 @@ import React from 'react';
 import Link from 'next/link';
 import { GitBranch, Zap, ArrowRight, Star } from 'lucide-react';
 
+// Placeholder/demo data for the UI. These are not real repos — they’re hardcoded so the homepage and project pages (e.g. /acme/payments-service) have something to show. Replace with real DB/API once projects are stored.
 const DEMO_PROJECTS = [
   { owner: 'acme', repo: 'payments-service', desc: 'Stripe integration and billing flows', features: 12, coverage: 87, stars: 42 },
   { owner: 'acme', repo: 'auth-service', desc: 'OAuth2, SAML, and session management', features: 8, coverage: 64, stars: 31 },

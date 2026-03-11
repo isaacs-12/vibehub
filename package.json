@@ -6,11 +6,12 @@
     "node": ">=20"
   },
   "workspaces": [
-    "packages/*"
+    "packages/web",
+    "packages/desktop"
   ],
   "scripts": {
     "build": "npm run build --workspaces",
-    "dev": "npm run dev --workspace=packages/cli",
+    "dev": "npm run dev --workspace=packages/web",
     "lint": "npm run lint --workspaces"
   },
   "devDependencies": {

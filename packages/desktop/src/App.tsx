@@ -20,7 +20,7 @@ export default function App() {
   }, []);
 
   return (
-    <div className="flex flex-col h-screen bg-surface text-gray-100 select-none">
+    <div className="flex flex-col h-screen bg-surface text-gray-100">
       <TopBar />
       <div className="flex flex-1 overflow-hidden relative">
         <PanelGroup direction="horizontal" className="flex-1">
@@ -48,7 +48,7 @@ export default function App() {
 
         {/* Chat Sidebar overlay */}
         {chatOpen && (
-          <div className="absolute right-0 top-0 bottom-0 w-96 bg-surface-overlay border-l border-surface-border shadow-2xl z-50">
+          <div className="absolute right-0 top-0 bottom-0 w-96 bg-surface-overlay border-l border-surface-border shadow-2xl z-50 select-text">
             <ChatSidebar />
           </div>
         )}

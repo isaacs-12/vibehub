@@ -1,6 +1,8 @@
 # vibehub
 Vibes-First, Self-Hosted, Git-Like Project Manager
 
-**Current status:** Only the **CLI** (`packages/cli`) and shared types/storage/DB abstractions exist. The **Web Forge** (Next.js) and **Desktop App** (Tauri) are planned; not yet in this repo.
+**Current status:** **CLI** (`packages/cli`), **Web** (Next.js in `packages/web`), and **Desktop** (Tauri in `packages/desktop`) are in the repo. The web app shows placeholder **acme/** projects (e.g. `acme/payments-service`) — they’re hardcoded demo data, not from a DB; replace with real project data when you wire up the API.
 
-**Node:** Use Node 20 (LTS). The CLI depends on `better-sqlite3`, which does not yet support Node 25. Run `nvm use` if you use nvm (see `.nvmrc`).
+**Desktop:** Open a folder that has a `.vibe/` directory (or run `vibe init` in a repo first), then use **Open Project** in the top bar so the app is “connected.” Chat requires `GEMINI_API_KEY` in the environment.
+
+**Node:** Use Node 20+. Run `nvm use` if you use nvm (see `.nvmrc`).

@@ -35,7 +35,11 @@ export default function FeatureSidebar() {
 
       {/* Feature Tree */}
       <div className="flex-1 overflow-y-auto py-1">
-        {features.length === 0 ? (
+        {!projectRoot ? (
+          <div className="px-4 py-3 text-xs text-muted">
+            No project open. Use <strong className="text-gray-300">Open Project</strong> in the top bar to open a folder with a <code className="font-mono">.vibe/</code> directory (or run <code className="font-mono">vibe init</code> in a repo first).
+          </div>
+        ) : features.length === 0 ? (
           <div className="px-4 py-3 text-xs text-muted italic">
             No features yet. Click + to add one, or run <code className="font-mono">vibe init</code>.
           </div>

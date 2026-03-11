@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Vibe Studio",
         "width": 1400,
         "height": 900,

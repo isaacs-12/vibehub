@@ -8,9 +8,20 @@ export default function TopBar() {
   const { openProject } = useVibeProject();
 
   async function handleOpenProject() {
-    const { open } = await import('@tauri-apps/plugin-dialog');
-    const selected = await open({ directory: true, multiple: false, title: 'Open Vibe Project' });
-    if (selected && typeof selected === 'string') openProject(selected);
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: 'Open Vibe Project',
+      });
+      if (selected && typeof selected === 'string') {
+        openProject(selected);
+      }
+    } catch (err) {
+      console.error('Open Project failed:', err);
+      alert(`Could not open folder picker: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   async function handleVibeCompile() {

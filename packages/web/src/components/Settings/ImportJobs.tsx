@@ -12,6 +12,7 @@ interface ImportJob {
 }
 
 const DEMO_JOBS: ImportJob[] = [
+  // Demo rows — same “acme” placeholder concept as homepage
   { id: '1', repoUrl: 'github.com/acme/legacy-monolith', status: 'done', featuresExtracted: 14, startedAt: '2d ago' },
   { id: '2', repoUrl: 'github.com/acme/payment-service', status: 'running', featuresExtracted: 0, startedAt: '5m ago' },
 ];

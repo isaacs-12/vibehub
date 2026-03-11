@@ -1,37 +1,20 @@
 # ─── Stage 1: Build ───────────────────────────────────────────────────────────
-FROM node:20-alpine AS builder
+FROM golang:1.22-alpine AS builder
 
 WORKDIR /app
 
-# Install dependencies first (layer cache)
-COPY package.json package-lock.json* ./
-COPY packages/cli/package.json ./packages/cli/
+COPY packages/cli/go.mod packages/cli/go.sum* ./
+RUN go mod download 2>/dev/null || true
 
-RUN npm install --ignore-scripts
-
-# Copy source and build
-COPY tsconfig.base.json ./
-COPY packages/cli/ ./packages/cli/
-
-RUN npm run build --workspace=packages/cli
+COPY packages/cli/ .
+RUN go build -o /vibe -ldflags="-s -w" .
 
 # ─── Stage 2: Runtime ─────────────────────────────────────────────────────────
-FROM node:20-alpine AS runtime
+FROM alpine:3.20
 
-WORKDIR /app
+RUN apk add --no-cache ca-certificates git
 
-# Only production deps
-COPY package.json package-lock.json* ./
-COPY packages/cli/package.json ./packages/cli/
+COPY --from=builder /vibe /usr/local/bin/vibe
 
-RUN npm install --workspace=packages/cli --omit=dev --ignore-scripts
-
-# Copy compiled output
-COPY --from=builder /app/packages/cli/dist ./packages/cli/dist
-
-# Expose the CLI as a command
-ENV PATH="/app/packages/cli/dist:$PATH"
-
-# Default: run the CLI (override with docker run -- vibe <cmd>)
-ENTRYPOINT ["node", "/app/packages/cli/dist/cli.js"]
+ENTRYPOINT ["vibe"]
 CMD ["--help"]

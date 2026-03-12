@@ -1,0 +1,87 @@
+name: vibehub
+
+services:
+
+  # ── Postgres ───────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: vibehub
+      POSTGRES_PASSWORD: vibehub
+      POSTGRES_DB: vibehub
+    # Host 5433 avoids conflict with system Postgres on 5432
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vibehub"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── LocalStack (S3 emulation) ──────────────────────────────────────────────
+  localstack:
+    image: localstack/localstack:3
+    restart: unless-stopped
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: s3
+      DEFAULT_REGION: us-east-1
+      LOCALSTACK_AUTH_TOKEN: ""          # community edition — no token needed
+    volumes:
+      - localstack_data:/var/lib/localstack
+      - ./scripts/localstack-init.sh:/etc/localstack/init/ready.d/init.sh:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Web (Next.js) — hot-reload dev server ─────────────────────────────────
+  web:
+    build:
+      context: .
+      dockerfile: packages/web/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://vibehub:vibehub@postgres:5432/vibehub
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      S3_BUCKET: vibehub-artifacts
+      VIBEHUB_STORAGE: s3
+      VIBEHUB_DB: postgres
+    volumes:
+      # Mount source for hot reload; node_modules stays in the container
+      - ./packages/web/src:/app/packages/web/src:delegated
+      - ./packages/web/public:/app/packages/web/public:delegated
+      - ./tsconfig.base.json:/app/tsconfig.base.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+
+  # ── CLI (on-demand — not a long-running service) ───────────────────────────
+  cli:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    profiles: [cli]       # only starts when explicitly requested
+    env_file: .env
+    volumes:
+      - .:/workspace:delegated
+    working_dir: /workspace
+    entrypoint: ["vibe"]
+    command: ["--help"]
+
+volumes:
+  postgres_data:
+  localstack_data:

@@ -1,0 +1,19 @@
+{
+  "name": "@vibehub/agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cloud compile agent — runs separately from the web backend for independent scaling.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "node --experimental-strip-types src/index.ts",
+    "dev": "node --watch --experimental-strip-types src/index.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@google/generative-ai": "^0.24.1"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

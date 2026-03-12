@@ -1,0 +1,187 @@
+name: Vibe CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── 1. Build & typecheck all packages ────────────────────────────────────────
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build CLI
+        run: npm run build --workspace=packages/cli
+
+      - name: Typecheck web
+        run: npx tsc --noEmit --project packages/web/tsconfig.json
+
+      - name: Upload CLI dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-dist
+          path: packages/cli/dist/
+          retention-days: 1
+
+  # ── 2. Vibe Compile — check that code matches Vibe specs ──────────────────
+  vibe-compile:
+    name: Vibe Compile (check-only)
+    runs-on: ubuntu-latest
+    needs: build
+    # Only run when the repo has a .vibe/ directory
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Download CLI dist
+        uses: actions/download-artifact@v4
+        with:
+          name: cli-dist
+          path: packages/cli/dist/
+
+      - name: Check .vibe/ exists
+        id: check_vibe
+        run: |
+          if [ -d ".vibe" ]; then
+            echo "has_vibe=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_vibe=false" >> "$GITHUB_OUTPUT"
+            echo "No .vibe/ directory found — skipping Vibe Compile."
+          fi
+
+      - name: Run Vibe Compile (check-only)
+        if: steps.check_vibe.outputs.has_vibe == 'true'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          node packages/cli/dist/cli.js compile \
+            --dir . \
+            --check \
+            --json > vibe-report.json
+          cat vibe-report.json | node -e "
+            const r = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+            console.log('Status:', r.status);
+            console.log('Requirement score:', r.summary.requirementScore + '/100');
+            console.log('Type errors:', r.summary.typeErrors);
+            if (r.status === 'failed') process.exit(1);
+          "
+
+      - name: Upload Vibe Report
+        if: always() && steps.check_vibe.outputs.has_vibe == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: vibe-report
+          path: vibe-report.json
+          retention-days: 7
+
+  # ── 3. Web tests (when package/web has a test suite) ─────────────────────
+  web-tests:
+    name: Web Tests
+    runs-on: ubuntu-latest
+    needs: build
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: vibehub
+          POSTGRES_PASSWORD: vibehub
+          POSTGRES_DB: vibehub_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://vibehub:vibehub@localhost:5432/vibehub_test
+      VIBEHUB_DB: postgres
+      VIBEHUB_STORAGE: filesystem
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Push DB schema
+        run: npm run db:push --workspace=packages/web
+
+      - name: Run web tests
+        run: npm test --workspace=packages/web --if-present
+
+  # ── 4. PR comment with Vibe report ───────────────────────────────────────
+  comment-report:
+    name: PR Report
+    runs-on: ubuntu-latest
+    needs: vibe-compile
+    if: github.event_name == 'pull_request'
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Download Vibe Report
+        uses: actions/download-artifact@v4
+        with:
+          name: vibe-report
+        continue-on-error: true
+
+      - name: Post PR comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            let body = '## Vibe Compile Report\n\n';
+            try {
+              const fs = require('fs');
+              const report = JSON.parse(fs.readFileSync('vibe-report.json', 'utf8'));
+              const icon = report.status === 'success' ? '✅' : report.status === 'partial' ? '⚠️' : '❌';
+              body += `${icon} **${report.status.toUpperCase()}** — ${report.projectName}\n\n`;
+              body += `| Phase | Status | Duration |\n|---|---|---|\n`;
+              for (const [name, phase] of Object.entries(report.phases)) {
+                const s = phase.status === 'pass' ? '✅' : phase.status === 'fail' ? '❌' : '⏭️';
+                body += `| ${name} | ${s} ${phase.status} | ${phase.durationMs}ms |\n`;
+              }
+              body += `\n**Avg Requirement Score:** ${report.summary.requirementScore}/100\n`;
+              body += `**Type Errors:** ${report.summary.typeErrors} | **Tests:** ${report.summary.testsPassed} passed / ${report.summary.testsFailed} failed\n\n`;
+              if (report.features?.length) {
+                body += `<details><summary>Feature Scores</summary>\n\n`;
+                for (const f of report.features) {
+                  const s = f.requirementScore >= 90 ? '🟢' : f.requirementScore >= 75 ? '🟡' : '🔴';
+                  body += `${s} **${f.featureName}**: ${f.requirementScore}/100\n`;
+                  for (const issue of f.requirementIssues.slice(0, 2)) {
+                    body += `  - ${issue}\n`;
+                  }
+                }
+                body += `\n</details>\n`;
+              }
+            } catch {
+              body += '_No Vibe report generated (project may not have .vibe/ yet)._\n';
+            }
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });

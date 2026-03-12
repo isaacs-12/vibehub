@@ -1,10 +1,9 @@
 import React from 'react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { GitBranch, GitPullRequest, Settings, Zap, Plus, FolderOpen } from 'lucide-react';
+import { GitPullRequest, Settings, Zap, Plus, FolderOpen } from 'lucide-react';
 import { getStore } from '@/lib/data/store';
 import FeatureMap from '@/components/FeatureMap/FeatureMap';
-import VibeCoverage from '@/components/VibeCoverage/VibeCoverage';
 import type { FeatureNode } from '@/components/FeatureMap/FeatureMap';
 
 interface Props {
@@ -52,7 +51,7 @@ export default async function ProjectDashboard({ params }: Props) {
             className="flex items-center gap-1.5 px-3 py-1.5 border border-border text-sm rounded-md hover:bg-canvas-subtle transition-colors"
           >
             <GitPullRequest size={14} />
-            Vibe PRs
+            Changes
             {prs.length > 0 && (
               <span className="ml-1 bg-canvas text-fg-muted border border-border rounded-full px-1.5 text-xs">
                 {prs.filter((p) => p.status === 'open').length}
@@ -86,10 +85,16 @@ export default async function ProjectDashboard({ params }: Props) {
           {featureNodes.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 text-center gap-3 p-6">
               <div className="text-5xl opacity-20">◈</div>
-              <p className="text-sm text-fg-muted">No features yet.</p>
+              <p className="text-sm text-fg-muted">Nothing here yet.</p>
               <p className="text-xs text-fg-subtle max-w-xs">
-                Run <code className="bg-canvas text-accent-emphasis px-1 rounded">vibe import --repo .</code> to extract features from your codebase, or add them manually.
+                Describe what you want to build — open a Change to get started.
               </p>
+              <Link
+                href={`/${owner}/${repo}/pulls/new`}
+                className="text-xs text-accent-emphasis hover:underline"
+              >
+                + Describe a change
+              </Link>
             </div>
           ) : (
             <div className="h-96">
@@ -104,27 +109,18 @@ export default async function ProjectDashboard({ params }: Props) {
           <div className="bg-canvas-subtle border border-border rounded-lg overflow-hidden">
             <div className="px-4 py-3 border-b border-border flex items-center gap-2 text-sm font-semibold text-fg">
               <FolderOpen size={14} className="text-accent-emphasis" />
-              Open locally
+              Open in Vibe Studio
             </div>
             <div className="px-4 py-3 text-xs text-fg-muted space-y-2">
-              <p>To edit in <strong className="text-fg">Vibe Studio</strong> (desktop), clone then open the folder:</p>
-              <pre className="bg-canvas border border-border rounded p-2 text-accent-emphasis font-mono text-[11px] overflow-x-auto">
-                vibe clone {owner}/{repo}
-              </pre>
-              <p className="text-fg-subtle">Creates <code className="bg-canvas px-1 rounded">{owner}-{repo}/</code> with a <code className="bg-canvas px-1 rounded">.vibe/</code> directory. In Vibe Studio use <strong className="text-fg">Open Project</strong> → select that folder.</p>
+              <p>Use the desktop app to edit features, run the AI, and preview your project locally.</p>
+              <p className="text-fg-subtle">In Vibe Studio, choose <strong className="text-fg">Open Project</strong> and select your local <strong className="text-fg">{owner}/{repo}</strong> folder.</p>
             </div>
           </div>
 
-          <VibeCoverage
-            coverage={features.length > 0 ? Math.round((features.length / Math.max(features.length, 10)) * 100) : 0}
-            totalFiles={Math.max(features.length, 10)}
-            mappedFiles={features.length}
-          />
-
-          {/* Recent PRs */}
+          {/* Recent Changes */}
           <div className="bg-canvas-subtle border border-border rounded-lg overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-              <span className="text-sm font-semibold text-fg">Vibe PRs</span>
+              <span className="text-sm font-semibold text-fg">Recent Changes</span>
               <Link
                 href={`/${owner}/${repo}/pulls/new`}
                 className="text-xs text-accent-emphasis hover:underline flex items-center gap-1"
@@ -133,7 +129,7 @@ export default async function ProjectDashboard({ params }: Props) {
               </Link>
             </div>
             {recentPRs.length === 0 ? (
-              <div className="px-4 py-4 text-xs text-fg-muted text-center">No pull requests yet.</div>
+              <div className="px-4 py-4 text-xs text-fg-muted text-center">No changes yet.</div>
             ) : (
               <div className="divide-y divide-border">
                 {recentPRs.map((pr) => (

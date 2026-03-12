@@ -1,15 +1,12 @@
 import React from 'react';
 import Link from 'next/link';
-import { GitBranch, Zap, ArrowRight, Star } from 'lucide-react';
+import { Zap, ArrowRight } from 'lucide-react';
+import { getStore } from '@/lib/data/store';
 
-// Placeholder/demo data for the UI. These are not real repos — they’re hardcoded so the homepage and project pages (e.g. /acme/payments-service) have something to show. Replace with real DB/API once projects are stored.
-const DEMO_PROJECTS = [
-  { owner: 'acme', repo: 'payments-service', desc: 'Stripe integration and billing flows', features: 12, coverage: 87, stars: 42 },
-  { owner: 'acme', repo: 'auth-service', desc: 'OAuth2, SAML, and session management', features: 8, coverage: 64, stars: 31 },
-  { owner: 'vibehub', repo: 'vibehub', desc: 'The vibe-first Git forge itself', features: 6, coverage: 42, stars: 128 },
-];
+export default async function HomePage() {
+  const projects = await getStore().listProjects();
+  const recentProjects = projects.slice(0, 3);
 
-export default function HomePage() {
   return (
     <div className="mx-auto max-w-screen-xl px-4 py-12">
       {/* Hero */}
@@ -34,48 +31,34 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* Projects */}
-      <div className="mb-6 flex items-center justify-between">
-        <h2 className="font-semibold text-fg">Recent Projects</h2>
-        <Link href="/explore" className="text-xs text-accent-emphasis hover:underline flex items-center gap-1">
-          View all <ArrowRight size={11} />
-        </Link>
-      </div>
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {DEMO_PROJECTS.map((p) => (
-          <ProjectCard key={`${p.owner}/${p.repo}`} {...p} />
-        ))}
-      </div>
+      {/* Recent Projects */}
+      {recentProjects.length > 0 && (
+        <>
+          <div className="mb-6 flex items-center justify-between">
+            <h2 className="font-semibold text-fg">Recent Projects</h2>
+            <Link href="/explore" className="text-xs text-accent-emphasis hover:underline flex items-center gap-1">
+              View all <ArrowRight size={11} />
+            </Link>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {recentProjects.map((p) => (
+              <Link
+                key={p.id}
+                href={`/${p.owner}/${p.repo}`}
+                className="block bg-canvas-subtle border border-border rounded-lg p-4 hover:border-accent/50 transition-colors group"
+              >
+                <div className="mb-2">
+                  <div className="text-xs text-fg-muted">{p.owner} /</div>
+                  <div className="font-semibold text-fg group-hover:text-accent-emphasis transition-colors">{p.repo}</div>
+                </div>
+                {p.description && (
+                  <p className="text-sm text-fg-muted line-clamp-2">{p.description}</p>
+                )}
+              </Link>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
-}
-
-function ProjectCard({ owner, repo, desc, features, coverage, stars }: typeof DEMO_PROJECTS[number]) {
-  return (
-    <Link
-      href={`/${owner}/${repo}`}
-      className="block bg-canvas-subtle border border-border rounded-lg p-4 hover:border-accent/50 transition-colors group"
-    >
-      <div className="flex items-start justify-between mb-2">
-        <div>
-          <div className="text-xs text-fg-muted">{owner} /</div>
-          <div className="font-semibold text-fg group-hover:text-accent-emphasis transition-colors">{repo}</div>
-        </div>
-        <div className="flex items-center gap-1 text-xs text-fg-muted">
-          <Star size={11} />
-          {stars}
-        </div>
-      </div>
-      <p className="text-sm text-fg-muted mb-3 line-clamp-2">{desc}</p>
-      <div className="flex items-center justify-between text-xs text-fg-subtle">
-        <span className="flex items-center gap-1"><Zap size={10} className="text-accent-emphasis" />{features} features</span>
-        <VibeCoverageBadge coverage={coverage} />
-      </div>
-    </Link>
-  );
-}
-
-function VibeCoverageBadge({ coverage }: { coverage: number }) {
-  const color = coverage >= 80 ? 'text-success' : coverage >= 50 ? 'text-attention' : 'text-danger';
-  return <span className={`font-mono ${color}`}>{coverage}% vibed</span>;
 }

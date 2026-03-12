@@ -1,6 +1,52 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Plus, ChevronDown, ChevronRight, FileText } from 'lucide-react';
+import { Plus, ChevronDown, ChevronRight, FileText, Trash2, Pencil, Folder } from 'lucide-react';
 import { useVibeStore, type FeatureNode } from '../../store/index.ts';
+
+// ─── Tree builder ──────────────────────────────────────────────────────────────
+
+function buildTree(raw: Array<{ name: string; path: string; content: string }>): FeatureNode[] {
+  const root: FeatureNode[] = [];
+  const folderMap = new Map<string, FeatureNode>();
+
+  for (const entry of raw) {
+    // Strip ".vibe/features/" prefix and ".md" suffix to get e.g. "auth/login"
+    const rel = entry.path
+      .replace(/^\.vibe[/\\]features[/\\]/, '')
+      .replace(/\.md$/, '');
+    const parts = rel.split(/[/\\]/);
+
+    if (parts.length === 1) {
+      root.push({ name: entry.name, path: entry.path, content: entry.content });
+    } else {
+      let current = root;
+      let folderKey = '.vibe/features';
+      for (let i = 0; i < parts.length - 1; i++) {
+        folderKey += '/' + parts[i];
+        let folder = folderMap.get(folderKey);
+        if (!folder) {
+          folder = { name: parts[i], path: folderKey, content: '', children: [] };
+          folderMap.set(folderKey, folder);
+          current.push(folder);
+        }
+        current = folder.children!;
+      }
+      current.push({ name: entry.name, path: entry.path, content: entry.content });
+    }
+  }
+
+  return root;
+}
+
+async function refreshFeatures(projectRoot: string) {
+  const { invoke } = await import('@tauri-apps/api/core');
+  const raw = await invoke<Array<{ name: string; path: string; content: string }>>(
+    'list_vibe_features',
+    { root: projectRoot },
+  );
+  useVibeStore.setState({ features: buildTree(raw) });
+}
+
+// ─── Sidebar ───────────────────────────────────────────────────────────────────
 
 export default function FeatureSidebar() {
   const { features, selectedFeature, selectFeature, projectRoot } = useVibeStore();
@@ -13,21 +59,22 @@ export default function FeatureSidebar() {
     if (adding) inputRef.current?.focus();
   }, [adding]);
 
+  function slugify(name: string) {
+    return name.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-/]/g, '');
+  }
+
   async function commitNewFeature() {
-    const name = newName.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    const slug = slugify(newName);
     setAdding(false);
     setNewName('');
-    if (!name || !projectRoot) return;
+    if (!slug || !projectRoot) return;
     const { invoke } = await import('@tauri-apps/api/core');
     await invoke('write_vibe_file', {
       root: projectRoot,
-      relativePath: `.vibe/features/${name}.md`,
-      content: `# ${name}\n\n## Overview\n\n## Goals\n\n## Non-Goals\n`,
+      relativePath: `.vibe/features/${slug}.md`,
+      content: `# ${slug}\n\n## Overview\n\n## Goals\n\n## Non-Goals\n`,
     });
-    const raw = await invoke<Array<{ name: string; path: string; content: string }>>('list_vibe_features', { root: projectRoot });
-    useVibeStore.setState({
-      features: raw.map((f) => ({ name: f.name, path: f.path, content: f.content })),
-    });
+    await refreshFeatures(projectRoot);
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -58,10 +105,10 @@ export default function FeatureSidebar() {
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={handleKeyDown}
             onBlur={commitNewFeature}
-            placeholder="feature-name"
+            placeholder="name or folder/name"
             className="w-full bg-surface border border-accent/50 rounded px-2 py-1 text-xs text-gray-200 placeholder:text-muted focus:outline-none focus:border-accent"
           />
-          <p className="text-[10px] text-muted mt-1">Enter to confirm · Esc to cancel</p>
+          <p className="text-[10px] text-muted mt-1">Use / to nest · Enter to confirm · Esc to cancel</p>
         </div>
       )}
 
@@ -69,11 +116,11 @@ export default function FeatureSidebar() {
       <div className="flex-1 overflow-y-auto py-1">
         {!projectRoot ? (
           <div className="px-4 py-3 text-xs text-muted">
-            No project open. Use <strong className="text-gray-300">Open Project</strong> in the top bar to open a folder with a <code className="font-mono">.vibe/</code> directory (or run <code className="font-mono">vibe init</code> in a repo first).
+            No project open. Use <strong className="text-gray-300">Open Project</strong> to get started.
           </div>
         ) : features.length === 0 ? (
           <div className="px-4 py-3 text-xs text-muted italic">
-            No features yet. Click + to add one, or run <code className="font-mono">vibe init</code>.
+            No features yet. Click + to add one.
           </div>
         ) : (
           features.map((feature) => (
@@ -81,7 +128,7 @@ export default function FeatureSidebar() {
               key={feature.path}
               feature={feature}
               depth={0}
-              selected={selectedFeature?.path === feature.path}
+              selectedPath={selectedFeature?.path ?? null}
               expanded={expanded}
               onToggle={(path) =>
                 setExpanded((prev) => {
@@ -91,6 +138,7 @@ export default function FeatureSidebar() {
                 })
               }
               onSelect={selectFeature}
+              projectRoot={projectRoot}
             />
           ))
         )}
@@ -99,52 +147,140 @@ export default function FeatureSidebar() {
   );
 }
 
+// ─── Tree item ─────────────────────────────────────────────────────────────────
+
 function FeatureTreeItem({
   feature,
   depth,
-  selected,
+  selectedPath,
   expanded,
   onToggle,
   onSelect,
+  projectRoot,
 }: {
   feature: FeatureNode;
   depth: number;
-  selected: boolean;
+  selectedPath: string | null;
   expanded: Set<string>;
   onToggle: (path: string) => void;
   onSelect: (f: FeatureNode) => void;
+  projectRoot: string;
 }) {
-  const hasChildren = feature.children && feature.children.length > 0;
+  const hasChildren = (feature.children?.length ?? 0) > 0;
   const isExpanded = expanded.has(feature.path);
+  const isFolder = hasChildren || feature.content === '';
+  const isSelected = selectedPath === feature.path;
+
+  const [renaming, setRenaming] = useState(false);
+  const [renameVal, setRenameVal] = useState('');
+  const renameRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (renaming) renameRef.current?.focus();
+  }, [renaming]);
+
+  function startRename(e: React.MouseEvent) {
+    e.stopPropagation();
+    setRenameVal(feature.name);
+    setRenaming(true);
+  }
+
+  async function commitRename() {
+    const newName = renameVal.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    setRenaming(false);
+    if (!newName || newName === feature.name) return;
+    const newRelPath = feature.path.replace(/([^/\\]+)\.md$/, `${newName}.md`);
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('rename_vibe_file', {
+      root: projectRoot,
+      oldPath: feature.path,
+      newPath: newRelPath,
+    });
+    await refreshFeatures(projectRoot);
+  }
+
+  async function handleDelete(e: React.MouseEvent) {
+    e.stopPropagation();
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('delete_vibe_file', { root: projectRoot, relativePath: feature.path });
+    const store = useVibeStore.getState();
+    if (store.selectedFeature?.path === feature.path) {
+      useVibeStore.setState({ selectedFeature: null, editorContent: '', isDirty: false });
+    }
+    await refreshFeatures(projectRoot);
+  }
+
+  if (renaming) {
+    return (
+      <div className="px-2 py-1" style={{ paddingLeft: `${8 + depth * 12}px` }}>
+        <input
+          ref={renameRef}
+          value={renameVal}
+          onChange={(e) => setRenameVal(e.target.value)}
+          onBlur={commitRename}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commitRename();
+            if (e.key === 'Escape') setRenaming(false);
+          }}
+          className="w-full bg-surface border border-accent/50 rounded px-2 py-0.5 text-xs text-gray-200 focus:outline-none focus:border-accent"
+        />
+      </div>
+    );
+  }
 
   return (
     <>
-      <button
-        onClick={() => (hasChildren ? onToggle(feature.path) : onSelect(feature))}
-        className={`w-full flex items-center gap-1.5 px-2 py-1 text-xs text-left transition-colors rounded-sm mx-1 ${
-          selected
+      <div
+        className={`group w-full flex items-center gap-1.5 px-2 py-1 text-xs text-left transition-colors rounded-sm mx-1 cursor-pointer ${
+          isSelected
             ? 'bg-accent/20 text-accent-light'
             : 'text-gray-300 hover:bg-surface-overlay hover:text-gray-100'
         }`}
         style={{ paddingLeft: `${8 + depth * 12}px` }}
+        onClick={() => (hasChildren ? onToggle(feature.path) : onSelect(feature))}
       >
-        {hasChildren ? (
-          isExpanded ? <ChevronDown size={12} className="shrink-0" /> : <ChevronRight size={12} className="shrink-0" />
+        {isFolder ? (
+          isExpanded
+            ? <ChevronDown size={12} className="shrink-0" />
+            : <ChevronRight size={12} className="shrink-0" />
         ) : (
           <FileText size={12} className="shrink-0 text-muted" />
         )}
-        <span className="truncate">{feature.name}</span>
-      </button>
+        {isFolder && !hasChildren && <Folder size={12} className="shrink-0 text-muted" />}
+        <span className="truncate flex-1">{feature.name}</span>
+
+        {/* Hover actions — only on leaf files */}
+        {!isFolder && (
+          <span className="hidden group-hover:flex items-center gap-1 ml-1">
+            <button
+              onClick={startRename}
+              className="text-muted hover:text-gray-200 transition-colors"
+              title="Rename"
+            >
+              <Pencil size={11} />
+            </button>
+            <button
+              onClick={handleDelete}
+              className="text-muted hover:text-red-400 transition-colors"
+              title="Delete"
+            >
+              <Trash2 size={11} />
+            </button>
+          </span>
+        )}
+      </div>
+
       {hasChildren && isExpanded &&
         feature.children!.map((child) => (
           <FeatureTreeItem
             key={child.path}
             feature={child}
             depth={depth + 1}
-            selected={selected}
+            selectedPath={selectedPath}
             expanded={expanded}
             onToggle={onToggle}
             onSelect={onSelect}
+            projectRoot={projectRoot}
           />
         ))}
     </>

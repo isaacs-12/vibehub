@@ -3,6 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Stdio;
 use serde::{Deserialize, Serialize};
+use serde_json;
 use tauri::{AppHandle, Emitter, State};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -90,6 +91,28 @@ pub async fn write_vibe_file(
     }
     fs::write(&abs, &content).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Delete a single vibe file by relative path.
+#[tauri::command]
+pub async fn delete_vibe_file(root: String, relative_path: String) -> Result<(), String> {
+    let abs = PathBuf::from(&root).join(&relative_path);
+    fs::remove_file(&abs).map_err(|e| e.to_string())
+}
+
+/// Rename (move) a vibe file. Creates parent directories for the new path if needed.
+#[tauri::command]
+pub async fn rename_vibe_file(
+    root: String,
+    old_path: String,
+    new_path: String,
+) -> Result<(), String> {
+    let old_abs = PathBuf::from(&root).join(&old_path);
+    let new_abs = PathBuf::from(&root).join(&new_path);
+    if let Some(parent) = new_abs.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::rename(&old_abs, &new_abs).map_err(|e| e.to_string())
 }
 
 /// Persist chat sessions for a project to .vibe/chats.json.
@@ -276,11 +299,81 @@ fn find_python_entry(root: &std::path::Path) -> Option<std::path::PathBuf> {
     None
 }
 
-/// Ensure project can run: detect project type (Python vs Node), scaffold only when needed, then run the right command.
+/// Read .vibe/project.json if it exists, returning (dev_command, install_command).
+fn read_project_manifest(root: &std::path::Path) -> Option<(String, Option<String>)> {
+    let manifest_path = root.join(".vibe").join("project.json");
+    let text = fs::read_to_string(&manifest_path).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let dev = v.get("dev")?.as_str()?.to_string();
+    let install = v.get("install").and_then(|s| s.as_str()).map(|s| s.to_string());
+    Some((dev, install))
+}
+
+/// Ensure project can run: check .vibe/project.json first, then fall back to heuristic detection.
 /// Only one run at a time: kills previous process. Streams stdout/stderr via "run-output"; emits "run-ended" when process exits.
 #[tauri::command]
 pub async fn run_project(app: AppHandle, root: String, run_state: State<'_, RunState>) -> Result<String, String> {
     let root_path = PathBuf::from(&root);
+
+    // Prefer manifest-declared dev command over heuristic detection.
+    if let Some((dev_cmd, install_cmd)) = read_project_manifest(&root_path) {
+        // Run install if needed (e.g. node_modules missing) and install command is specified.
+        if let Some(install) = install_cmd {
+            let node_modules = root_path.join("node_modules");
+            if !node_modules.exists() {
+                let parts: Vec<&str> = install.splitn(2, ' ').collect();
+                let _ = std::process::Command::new(parts[0])
+                    .args(&parts[1..])
+                    .current_dir(&root_path)
+                    .status();
+            }
+        }
+
+        let mut guard = run_state.0.lock().await;
+        if let Some(pid) = *guard { kill_pid(pid); }
+        *guard = None;
+        drop(guard);
+
+        let parts: Vec<&str> = dev_cmd.splitn(2, ' ').collect();
+        let program = parts[0];
+        let args: Vec<&str> = if parts.len() > 1 { parts[1].split_whitespace().collect() } else { vec![] };
+
+        let mut child = tokio::process::Command::new(program)
+            .args(&args)
+            .current_dir(&root_path)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Failed to run '{}': {}", dev_cmd, e))?;
+
+        let pid = child.id();
+        if let Some(pid) = pid { *run_state.0.lock().await = Some(pid); }
+
+        let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
+        let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
+        let app2 = app.clone();
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stdout).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let _ = app2.emit("run-output", serde_json::json!({ "line": line, "stderr": false }));
+            }
+        });
+        let app3 = app.clone();
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let _ = app3.emit("run-output", serde_json::json!({ "line": line, "stderr": true }));
+            }
+        });
+        let app4 = app.clone();
+        tokio::spawn(async move {
+            let _ = child.wait().await;
+            let _ = app4.emit("run-ended", ());
+        });
+
+        return Ok(dev_cmd);
+    }
+
     let project_type = detect_project_type(&root_path);
 
     match project_type {
@@ -714,6 +807,22 @@ pub async fn merge_branch_locally(root: String, branch: String) -> Result<String
     let _ = run(&["checkout", &original_branch]);
 
     merge_result.map(|_| format!("Merged '{}' into main. Checkout main to inspect.", branch))
+}
+
+/// Read .vibe/remote.json and return its fields. Returns empty strings if the file doesn't exist.
+#[tauri::command]
+pub async fn read_remote_config(root: String) -> Result<serde_json::Value, String> {
+    let path = PathBuf::from(&root).join(".vibe").join("remote.json");
+    if !path.exists() {
+        return Ok(serde_json::json!({ "owner": "", "repo": "", "webUrl": "http://localhost:3000" }));
+    }
+    let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "owner": v.get("owner").and_then(|x| x.as_str()).unwrap_or(""),
+        "repo": v.get("repo").and_then(|x| x.as_str()).unwrap_or(""),
+        "webUrl": v.get("webUrl").and_then(|x| x.as_str()).unwrap_or("http://localhost:3000"),
+    }))
 }
 
 /// Write .vibe/remote.json so Push knows where to send the branch (owner, repo, web app URL).

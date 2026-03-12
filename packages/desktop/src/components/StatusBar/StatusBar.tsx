@@ -95,7 +95,16 @@ export default function StatusBar() {
     } catch (err) {
       const errStr = String(err);
       if (errStr.includes('NO_REMOTE') || errStr.includes('remote.json')) {
-        setRemoteModal({ owner: '', repo: '', webUrl: 'http://localhost:3000' });
+        // Pre-fill from existing remote.json written by `vibe clone` (if present).
+        try {
+          const { invoke } = await import('@tauri-apps/api/core');
+          const existing = await invoke<{ owner: string; repo: string; webUrl: string }>(
+            'read_remote_config', { root: projectRoot },
+          );
+          setRemoteModal(existing);
+        } catch {
+          setRemoteModal({ owner: '', repo: '', webUrl: 'http://localhost:3000' });
+        }
       } else {
         const { message } = await import('@tauri-apps/plugin-dialog');
         await message(errStr, { title: 'Push', kind: 'error' });

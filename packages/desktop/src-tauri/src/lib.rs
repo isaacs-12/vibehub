@@ -4,10 +4,10 @@
 mod commands;
 
 use commands::{
-    apply_chat_to_vibe_file, chat_with_vibes, compile_vibes, get_git_state, get_mapped_code,
-    git_checkout, git_create_branch, git_init, list_vibe_features, load_chats,
-    merge_branch_locally, pull_from_remote, push_branch_to_backend, run_project, save_chats,
-    write_vibe_file, write_remote_config, RunState,
+    apply_chat_to_vibe_file, chat_with_vibes, compile_vibes, delete_vibe_file, get_git_state,
+    get_mapped_code, git_checkout, git_create_branch, git_init, list_vibe_features, load_chats,
+    merge_branch_locally, pull_from_remote, push_branch_to_backend, read_remote_config,
+    rename_vibe_file, run_project, save_chats, write_vibe_file, write_remote_config, RunState,
 };
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -20,6 +20,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_vibe_features,
             write_vibe_file,
+            delete_vibe_file,
+            rename_vibe_file,
             get_mapped_code,
             get_git_state,
             git_checkout,
@@ -32,6 +34,7 @@ pub fn run() {
             pull_from_remote,
             save_chats,
             load_chats,
+            read_remote_config,
             write_remote_config,
             run_project,
             merge_branch_locally,

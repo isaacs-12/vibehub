@@ -1,59 +1,33 @@
 import React from 'react';
 
-const DEMO_DIFF = {
-  file: 'features/authentication.md',
-  hunks: [
-    {
-      header: '@@ Authentication Provider @@',
-      lines: [
-        { type: 'context', text: '## Authentication Strategy' },
-        { type: 'context', text: '' },
-        { type: 'removed', text: 'Users authenticate via email/password using bcrypt.' },
-        { type: 'removed', text: 'Password reset is handled via email link.' },
-        { type: 'added', text: 'Users authenticate via email/password **or Google OAuth2**.' },
-        { type: 'added', text: 'SSO via Google is the preferred login method.' },
-        { type: 'added', text: 'Password reset remains available as fallback.' },
-        { type: 'context', text: '' },
-        { type: 'context', text: '## Security Requirements' },
-      ],
-    },
-  ],
-};
+interface IntentDiffProps {
+  headFeatures: { path: string; content: string }[];
+}
 
-export default function IntentDiff() {
-  return (
-    <div className="border border-border rounded-lg overflow-hidden">
-      {/* File header */}
-      <div className="flex items-center justify-between px-4 py-2 bg-canvas-subtle border-b border-border text-sm">
-        <span className="font-mono text-fg">{DEMO_DIFF.file}</span>
-        <span className="text-xs text-fg-muted">
-          <span className="text-success">+3</span> / <span className="text-danger">-2</span> decisions
-        </span>
+export default function IntentDiff({ headFeatures }: IntentDiffProps) {
+  if (headFeatures.length === 0) {
+    return (
+      <div className="border border-border rounded-lg overflow-hidden">
+        <div className="px-4 py-6 text-sm text-fg-muted text-center">
+          No vibe file content for this branch. Push from Vibe Studio with the Push button to upload branch state.
+        </div>
       </div>
+    );
+  }
 
-      {/* Diff hunks */}
-      {DEMO_DIFF.hunks.map((hunk, i) => (
-        <div key={i}>
-          <div className="px-4 py-1 bg-accent-subtle/30 text-xs font-mono text-accent-emphasis">
-            {hunk.header}
+  return (
+    <div className="space-y-4">
+      {headFeatures.map(({ path, content }) => (
+        <div key={path} className="border border-border rounded-lg overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2 bg-canvas-subtle border-b border-border text-sm">
+            <span className="font-mono text-fg">{path}</span>
+            <span className="text-xs text-fg-muted">
+              {content.split(/\n/).length} line{content.split(/\n/).length !== 1 ? 's' : ''}
+            </span>
           </div>
-          {hunk.lines.map((line, j) => (
-            <div
-              key={j}
-              className={`flex text-sm font-mono px-4 py-0.5 ${
-                line.type === 'added'
-                  ? 'bg-success/10 text-success'
-                  : line.type === 'removed'
-                  ? 'bg-danger/10 text-danger line-through opacity-70'
-                  : 'text-fg-muted'
-              }`}
-            >
-              <span className="w-4 shrink-0 text-fg-subtle select-none">
-                {line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' '}
-              </span>
-              <span>{line.text || '\u00A0'}</span>
-            </div>
-          ))}
+          <pre className="px-4 py-3 text-xs font-mono text-fg-muted overflow-x-auto overflow-y-auto max-h-96 leading-relaxed bg-canvas-inset whitespace-pre-wrap">
+            {content}
+          </pre>
         </div>
       ))}
     </div>

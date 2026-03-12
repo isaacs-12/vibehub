@@ -1,26 +1,38 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Plus, ChevronDown, ChevronRight, FileText } from 'lucide-react';
 import { useVibeStore, type FeatureNode } from '../../store/index.ts';
 
 export default function FeatureSidebar() {
   const { features, selectedFeature, selectFeature, projectRoot } = useVibeStore();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [adding, setAdding] = useState(false);
+  const [newName, setNewName] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  async function handleNewFeature() {
-    if (!projectRoot) return;
-    const name = prompt('Feature name (kebab-case):');
-    if (!name) return;
+  useEffect(() => {
+    if (adding) inputRef.current?.focus();
+  }, [adding]);
+
+  async function commitNewFeature() {
+    const name = newName.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    setAdding(false);
+    setNewName('');
+    if (!name || !projectRoot) return;
     const { invoke } = await import('@tauri-apps/api/core');
     await invoke('write_vibe_file', {
       root: projectRoot,
       relativePath: `.vibe/features/${name}.md`,
       content: `# ${name}\n\n## Overview\n\n## Goals\n\n## Non-Goals\n`,
     });
-    // Reload features
     const raw = await invoke<Array<{ name: string; path: string; content: string }>>('list_vibe_features', { root: projectRoot });
     useVibeStore.setState({
       features: raw.map((f) => ({ name: f.name, path: f.path, content: f.content })),
     });
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === 'Enter') commitNewFeature();
+    if (e.key === 'Escape') { setAdding(false); setNewName(''); }
   }
 
   return (
@@ -28,10 +40,30 @@ export default function FeatureSidebar() {
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-surface-border">
         <span className="text-xs font-semibold uppercase tracking-widest text-muted">Features</span>
-        <button onClick={handleNewFeature} className="text-muted hover:text-gray-200 transition-colors">
+        <button
+          onClick={() => projectRoot && setAdding(true)}
+          className="text-muted hover:text-gray-200 transition-colors"
+          title="New feature"
+        >
           <Plus size={14} />
         </button>
       </div>
+
+      {/* New feature inline input */}
+      {adding && (
+        <div className="px-2 py-1.5 border-b border-surface-border">
+          <input
+            ref={inputRef}
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onBlur={commitNewFeature}
+            placeholder="feature-name"
+            className="w-full bg-surface border border-accent/50 rounded px-2 py-1 text-xs text-gray-200 placeholder:text-muted focus:outline-none focus:border-accent"
+          />
+          <p className="text-[10px] text-muted mt-1">Enter to confirm · Esc to cancel</p>
+        </div>
+      )}
 
       {/* Feature Tree */}
       <div className="flex-1 overflow-y-auto py-1">

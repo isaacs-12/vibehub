@@ -56,6 +56,8 @@ interface VibeStore {
   selectFeature: (feature: FeatureNode) => void;
   updateEditorContent: (content: string) => void;
   saveFeature: () => Promise<void>;
+  /** Set current feature content (e.g. after applying chat edits) without saving — file already written by backend. */
+  setCurrentFeatureContent: (content: string) => void;
   toggleCodePeek: () => void;
   setCodePeekFiles: (files: Array<{ path: string; content: string }>) => void;
   appendChatMessage: (msg: ChatMessage) => void;
@@ -63,11 +65,15 @@ interface VibeStore {
   createChat: () => void;
   setActiveChat: (id: string | null) => void;
   deleteChat: (id: string) => void;
+  /** Overwrite all chat sessions (used when loading persisted chats from disk). */
+  setChatSessions: (sessions: ChatSession[]) => void;
   setGitBranch: (branch: string, branches: string[]) => void;
   appendRunOutput: (line: string, stderr?: boolean) => void;
   clearRunOutput: () => void;
   setRunOutputVisible: (visible: boolean) => void;
   setRunInProgress: (inProgress: boolean) => void;
+  /** Reset all project-specific state and point at a new root. Called on project switch. */
+  resetProjectState: (newRoot: string) => void;
 }
 
 const initialSession = createSession('Chat 1');
@@ -114,6 +120,18 @@ export const useVibeStore = create<VibeStore>((set, get) => ({
     }));
   },
 
+  setCurrentFeatureContent: (content) =>
+    set((s) => {
+      if (!s.selectedFeature) return {};
+      return {
+        editorContent: content,
+        isDirty: false,
+        features: s.features.map((f) =>
+          f.path === s.selectedFeature!.path ? { ...f, content } : f,
+        ),
+      };
+    }),
+
   toggleCodePeek: () => set((s) => ({ codePeekVisible: !s.codePeekVisible })),
   setCodePeekFiles: (files) => set({ codePeekFiles: files }),
   appendChatMessage: (msg) =>
@@ -156,10 +174,31 @@ export const useVibeStore = create<VibeStore>((set, get) => ({
           : s.activeChatId;
       return { chatSessions: sessions, activeChatId: nextActive };
     }),
+  setChatSessions: (sessions) => {
+    if (sessions.length === 0) return;
+    set({ chatSessions: sessions, activeChatId: sessions[0].id });
+  },
   setGitBranch: (branch, branches) => set({ currentBranch: branch, branches }),
   appendRunOutput: (line, stderr) =>
     set((s) => ({ runOutputLines: [...s.runOutputLines, { line, stderr }] })),
   clearRunOutput: () => set({ runOutputLines: [] }),
   setRunOutputVisible: (visible) => set({ runOutputVisible: visible }),
   setRunInProgress: (inProgress) => set({ runInProgress: inProgress }),
+  resetProjectState: (newRoot) => {
+    const fresh = createSession('Chat 1');
+    set({
+      projectRoot: newRoot,
+      features: [],
+      selectedFeature: null,
+      editorContent: '',
+      isDirty: false,
+      codePeekFiles: [],
+      chatSessions: [fresh],
+      activeChatId: fresh.id,
+      currentBranch: 'main',
+      branches: [],
+      runOutputLines: [],
+      runInProgress: false,
+    });
+  },
 }));

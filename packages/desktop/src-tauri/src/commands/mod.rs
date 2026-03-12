@@ -39,6 +39,12 @@ pub struct ChatHistoryEntry {
     pub content: String,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct PushResult {
+    pub pr_id: String,
+    pub url: String,
+}
+
 // ─── File System Commands ─────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -84,6 +90,24 @@ pub async fn write_vibe_file(
     }
     fs::write(&abs, &content).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Persist chat sessions for a project to .vibe/chats.json.
+#[tauri::command]
+pub async fn save_chats(root: String, sessions_json: String) -> Result<(), String> {
+    let vibe_dir = PathBuf::from(&root).join(".vibe");
+    fs::create_dir_all(&vibe_dir).map_err(|e| e.to_string())?;
+    fs::write(vibe_dir.join("chats.json"), &sessions_json).map_err(|e| e.to_string())
+}
+
+/// Load persisted chat sessions for a project. Returns "[]" if none saved yet.
+#[tauri::command]
+pub async fn load_chats(root: String) -> Result<String, String> {
+    let path = PathBuf::from(&root).join(".vibe").join("chats.json");
+    if !path.exists() {
+        return Ok("[]".to_string());
+    }
+    fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -189,82 +213,216 @@ fn kill_pid(pid: u32) {
     }
 }
 
-/// Ensure project can run: scaffold with Vite if no package.json, then start dev server.
+/// Project type inferred from what's on disk so we run the right thing (Python vs Node/Vite).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ProjectType {
+    Python,
+    Node,
+}
+
+fn detect_project_type(root: &std::path::Path) -> ProjectType {
+    if root.join("pyproject.toml").exists() {
+        return ProjectType::Python;
+    }
+    if root.join("main.py").exists() || root.join("src/main.py").exists() {
+        return ProjectType::Python;
+    }
+    let src = root.join("src");
+    let has_py = src.exists()
+        && fs::read_dir(&src).map_or(false, |d| {
+            d.filter_map(|e| e.ok())
+                .any(|e| e.path().extension().map_or(false, |x| x == "py"))
+        });
+    let has_ts_entry = root.join("src/main.ts").exists() || root.join("src/index.ts").exists();
+    if has_py && !has_ts_entry {
+        return ProjectType::Python;
+    }
+    if root.join("package.json").exists() && has_ts_entry {
+        return ProjectType::Node;
+    }
+    if root.join("package.json").exists() && root.join("index.html").exists() {
+        return ProjectType::Node;
+    }
+    if has_py {
+        return ProjectType::Python;
+    }
+    ProjectType::Node
+}
+
+/// Find a runnable Python entry point (main.py, src/main.py, or first .py in src/).
+fn find_python_entry(root: &std::path::Path) -> Option<std::path::PathBuf> {
+    for name in ["main.py", "app.py"] {
+        let p = root.join(name);
+        if p.exists() {
+            return Some(p);
+        }
+        let p = root.join("src").join(name);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    let src = root.join("src");
+    if !src.exists() {
+        return None;
+    }
+    let mut entries: Vec<_> = fs::read_dir(&src).ok()?.filter_map(|e| e.ok()).collect();
+    entries.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+    for e in entries {
+        let p = e.path();
+        if p.extension().map_or(false, |x| x == "py") {
+            return Some(p);
+        }
+    }
+    None
+}
+
+/// Ensure project can run: detect project type (Python vs Node), scaffold only when needed, then run the right command.
 /// Only one run at a time: kills previous process. Streams stdout/stderr via "run-output"; emits "run-ended" when process exits.
 #[tauri::command]
 pub async fn run_project(app: AppHandle, root: String, run_state: State<'_, RunState>) -> Result<String, String> {
     let root_path = PathBuf::from(&root);
-    let pkg_path = root_path.join("package.json");
+    let project_type = detect_project_type(&root_path);
 
-    if !pkg_path.exists() {
-        scaffold_vite_app(&root_path)?;
-    } else {
-        // If dev script runs a single file (tsx), switch to Vite so Run starts a dev server and the user sees the app in the browser.
-        ensure_vite_dev_server(&root_path)?;
-    }
+    match project_type {
+        ProjectType::Python => {
+            let entry = find_python_entry(&root_path).ok_or_else(|| {
+                "No Python entry found (main.py, src/main.py, or src/*.py). Run Vibe to generate code.".to_string()
+            })?;
+            let rel = entry.strip_prefix(&root_path).unwrap_or(&entry);
+            let rel_str = rel.to_string_lossy().replace('\\', "/");
 
-    // Ensure dependencies (e.g. vite) are installed so config and dev server can load.
-    ensure_npm_install(&root_path).await?;
-
-    // Kill previous run if any
-    {
-        let mut guard = run_state.0.lock().await;
-        if let Some(pid) = *guard {
-            kill_pid(pid);
-        }
-        *guard = None;
-    }
-
-    let mut child = tokio::process::Command::new("npm")
-        .args(["run", "dev"])
-        .current_dir(&root_path)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Failed to start npm run dev: {}", e))?;
-
-    let pid = child.id();
-    if let Some(pid) = pid {
-        *run_state.0.lock().await = Some(pid);
-    }
-
-    let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
-    let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
-
-    let app_wait = app.clone();
-    let app_out = app.clone();
-    let app_err = app.clone();
-    let state_arc = run_state.0.clone();
-
-    tokio::spawn(async move {
-        let _ = child.wait().await;
-        *state_arc.lock().await = None;
-        let _ = app_wait.emit("run-ended", ());
-    });
-    tokio::spawn(async move {
-        let mut reader = BufReader::new(stdout);
-        let mut line = String::new();
-        while reader.read_line(&mut line).await.map(|n| n > 0).unwrap_or(false) {
-            let trimmed = line.trim_end_matches('\n').trim_end_matches('\r').to_string();
-            line.clear();
-            if !trimmed.is_empty() {
-                let _ = app_out.emit("run-output", serde_json::json!({ "line": trimmed }));
+            let mut guard = run_state.0.lock().await;
+            if let Some(pid) = *guard {
+                kill_pid(pid);
             }
-        }
-    });
-    tokio::spawn(async move {
-        let mut reader = BufReader::new(stderr);
-        let mut line = String::new();
-        while reader.read_line(&mut line).await.map(|n| n > 0).unwrap_or(false) {
-            let trimmed = line.trim_end_matches('\n').trim_end_matches('\r').to_string();
-            line.clear();
-            if !trimmed.is_empty() {
-                let _ = app_err.emit("run-output", serde_json::json!({ "line": trimmed, "stderr": true }));
-            }
-        }
-    });
+            *guard = None;
+            drop(guard);
 
-    Ok("Running. Output below. Open the URL (e.g. http://localhost:5173) in your browser.".to_string())
+            let mut child = tokio::process::Command::new("python3")
+                .arg(&rel_str)
+                .current_dir(&root_path)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .or_else(|_| {
+                    tokio::process::Command::new("python")
+                        .arg(&rel_str)
+                        .current_dir(&root_path)
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::piped())
+                        .spawn()
+                })
+                .map_err(|e| format!("Failed to run Python (tried python3 and python): {}", e))?;
+
+            let pid = child.id();
+            if let Some(pid) = pid {
+                *run_state.0.lock().await = Some(pid);
+            }
+
+            let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
+            let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
+            let app_wait = app.clone();
+            let app_out = app.clone();
+            let app_err = app.clone();
+            let state_arc = run_state.0.clone();
+
+            tokio::spawn(async move {
+                let _ = child.wait().await;
+                *state_arc.lock().await = None;
+                let _ = app_wait.emit("run-ended", ());
+            });
+            tokio::spawn(async move {
+                let mut reader = BufReader::new(stdout);
+                let mut line = String::new();
+                while reader.read_line(&mut line).await.map(|n| n > 0).unwrap_or(false) {
+                    let trimmed = line.trim_end_matches('\n').trim_end_matches('\r').to_string();
+                    line.clear();
+                    if !trimmed.is_empty() {
+                        let _ = app_out.emit("run-output", serde_json::json!({ "line": trimmed }));
+                    }
+                }
+            });
+            tokio::spawn(async move {
+                let mut reader = BufReader::new(stderr);
+                let mut line = String::new();
+                while reader.read_line(&mut line).await.map(|n| n > 0).unwrap_or(false) {
+                    let trimmed = line.trim_end_matches('\n').trim_end_matches('\r').to_string();
+                    line.clear();
+                    if !trimmed.is_empty() {
+                        let _ = app_err.emit("run-output", serde_json::json!({ "line": trimmed, "stderr": true }));
+                    }
+                }
+            });
+
+            Ok(format!("Running Python: {}. Output below.", rel_str))
+        }
+        ProjectType::Node => {
+            let pkg_path = root_path.join("package.json");
+            if !pkg_path.exists() {
+                scaffold_vite_app(&root_path)?;
+            } else {
+                ensure_vite_dev_server(&root_path)?;
+            }
+            ensure_npm_install(&root_path).await?;
+
+            let mut guard = run_state.0.lock().await;
+            if let Some(pid) = *guard {
+                kill_pid(pid);
+            }
+            *guard = None;
+            drop(guard);
+
+            let mut child = tokio::process::Command::new("npm")
+                .args(["run", "dev"])
+                .current_dir(&root_path)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .map_err(|e| format!("Failed to start npm run dev: {}", e))?;
+
+            let pid = child.id();
+            if let Some(pid) = pid {
+                *run_state.0.lock().await = Some(pid);
+            }
+
+            let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
+            let stderr = child.stderr.take().ok_or("Failed to capture stderr")?;
+            let app_wait = app.clone();
+            let app_out = app.clone();
+            let app_err = app.clone();
+            let state_arc = run_state.0.clone();
+
+            tokio::spawn(async move {
+                let _ = child.wait().await;
+                *state_arc.lock().await = None;
+                let _ = app_wait.emit("run-ended", ());
+            });
+            tokio::spawn(async move {
+                let mut reader = BufReader::new(stdout);
+                let mut line = String::new();
+                while reader.read_line(&mut line).await.map(|n| n > 0).unwrap_or(false) {
+                    let trimmed = line.trim_end_matches('\n').trim_end_matches('\r').to_string();
+                    line.clear();
+                    if !trimmed.is_empty() {
+                        let _ = app_out.emit("run-output", serde_json::json!({ "line": trimmed }));
+                    }
+                }
+            });
+            tokio::spawn(async move {
+                let mut reader = BufReader::new(stderr);
+                let mut line = String::new();
+                while reader.read_line(&mut line).await.map(|n| n > 0).unwrap_or(false) {
+                    let trimmed = line.trim_end_matches('\n').trim_end_matches('\r').to_string();
+                    line.clear();
+                    if !trimmed.is_empty() {
+                        let _ = app_err.emit("run-output", serde_json::json!({ "line": trimmed, "stderr": true }));
+                    }
+                }
+            });
+
+            Ok("Running dev server. Output below. Open http://localhost:5173 in your browser.".to_string())
+        }
+    }
 }
 
 /// Run npm install if node_modules is missing or vite (or other deps) are listed in package.json but not installed.
@@ -517,6 +675,283 @@ pub async fn git_create_branch(root: String, name: String) -> Result<(), String>
     Ok(())
 }
 
+/// Merge a feature branch into the local main branch using git.
+/// Checks out main, runs `git merge --no-ff <branch>`, then restores the original branch.
+#[tauri::command]
+pub async fn merge_branch_locally(root: String, branch: String) -> Result<String, String> {
+    let root_path = PathBuf::from(&root);
+
+    // Validate repo and branch exist before touching anything
+    let repo = git2::Repository::open(&root_path).map_err(|e| e.to_string())?;
+    repo.find_branch(&branch, git2::BranchType::Local)
+        .map_err(|_| format!("Branch '{}' not found locally.", branch))?;
+    let original_branch = repo.head()
+        .ok()
+        .and_then(|h| h.shorthand().map(String::from))
+        .unwrap_or_else(|| "main".to_string());
+    drop(repo);
+
+    // Use system git for the merge — git2's merge API has many edge cases.
+    let run = |args: &[&str]| -> Result<String, String> {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&root_path)
+            .output()
+            .map_err(|e| format!("Failed to run git: {}", e))?;
+        if out.status.success() {
+            Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+        } else {
+            Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+        }
+    };
+
+    run(&["checkout", "main"])?;
+    let merge_result = run(&[
+        "merge", "--no-ff", &branch,
+        "-m", &format!("Merge vibe branch: {}", branch),
+    ]);
+    // Always restore original branch even on failure
+    let _ = run(&["checkout", &original_branch]);
+
+    merge_result.map(|_| format!("Merged '{}' into main. Checkout main to inspect.", branch))
+}
+
+/// Write .vibe/remote.json so Push knows where to send the branch (owner, repo, web app URL).
+#[tauri::command]
+pub async fn write_remote_config(root: String, owner: String, repo: String, web_url: String) -> Result<(), String> {
+    let root_path = PathBuf::from(&root);
+    let vibe_dir = root_path.join(".vibe");
+    fs::create_dir_all(&vibe_dir).map_err(|e| e.to_string())?;
+    let url = if web_url.trim().is_empty() {
+        "http://localhost:3000"
+    } else {
+        web_url.trim()
+    };
+    let remote = serde_json::json!({ "owner": owner, "repo": repo, "webUrl": url });
+    let remote_path = vibe_dir.join("remote.json");
+    fs::write(
+        remote_path,
+        serde_json::to_string_pretty(&remote).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Returns contents of all .md files in .vibe/features/ on the base branch (main or master).
+/// Returns empty map on any error (e.g. no base branch yet).
+fn get_base_feature_contents(repo: &git2::Repository) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    let base_commit = ["main", "master"]
+        .iter()
+        .find_map(|name| {
+            repo.find_branch(name, git2::BranchType::Local)
+                .ok()
+                .and_then(|b| b.get().peel_to_commit().ok())
+        });
+    let commit = match base_commit {
+        Some(c) => c,
+        None => return map,
+    };
+    let tree = match commit.tree() {
+        Ok(t) => t,
+        Err(_) => return map,
+    };
+    let features_entry = match tree.get_path(std::path::Path::new(".vibe/features")) {
+        Ok(e) => e,
+        Err(_) => return map,
+    };
+    if features_entry.kind() != Some(git2::ObjectType::Tree) {
+        return map;
+    }
+    let features_tree = match repo.find_tree(features_entry.id()) {
+        Ok(t) => t,
+        Err(_) => return map,
+    };
+    for entry in features_tree.iter() {
+        if let Some(name) = entry.name() {
+            if name.ends_with(".md") {
+                if let Ok(blob) = repo.find_blob(entry.id()) {
+                    if let Ok(content) = std::str::from_utf8(blob.content()) {
+                        map.insert(name.to_string(), content.to_string());
+                    }
+                }
+            }
+        }
+    }
+    map
+}
+
+/// Push current branch state to the backend so it appears as a PR in the web app.
+/// Requires .vibe/remote.json with owner, repo, webUrl (use Configure remote in Push flow if missing).
+/// `implementation_proofs` is optional generated code from the Vibe compile step (code peek files).
+#[tauri::command]
+pub async fn push_branch_to_backend(
+    root: String,
+    implementation_proofs: Option<Vec<CodeFile>>,
+) -> Result<PushResult, String> {
+    let root_path = PathBuf::from(&root);
+    let remote_path = root_path.join(".vibe").join("remote.json");
+    let raw = fs::read_to_string(&remote_path)
+        .map_err(|_| "NO_REMOTE: No .vibe/remote.json. Configure owner, repo and web URL to push.")?;
+    let remote: serde_json::Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    let owner = remote.get("owner").and_then(|v| v.as_str()).ok_or("remote.json must have \"owner\"")?;
+    let repo = remote.get("repo").and_then(|v| v.as_str()).ok_or("remote.json must have \"repo\"")?;
+    let web_url = remote.get("webUrl").and_then(|v| v.as_str()).unwrap_or("http://localhost:3000");
+    let base = web_url.trim_end_matches('/');
+
+    let repo_result = git2::Repository::open(&root_path);
+    let branch = repo_result
+        .as_ref()
+        .ok()
+        .and_then(|r| r.head().ok().and_then(|h| h.shorthand().map(String::from)))
+        .unwrap_or_else(|| "main".to_string());
+
+    let features_dir = root_path.join(".vibe").join("features");
+    let mut all_features: Vec<(String, String)> = Vec::new();
+    if features_dir.exists() {
+        for entry in fs::read_dir(&features_dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let p = entry.path();
+            if p.extension().and_then(|e| e.to_str()) != Some("md") {
+                continue;
+            }
+            let rel = p
+                .strip_prefix(&root_path)
+                .map(|x| x.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_else(|_| p.to_string_lossy().to_string());
+            let content = fs::read_to_string(&p).unwrap_or_default();
+            all_features.push((rel, content));
+        }
+    }
+
+    // Compute the intent diff: only include features that are new or changed vs the base branch.
+    // If on main/master or base can't be resolved, fall back to all features.
+    let is_main = branch == "main" || branch == "master";
+    let base_features = if is_main {
+        HashMap::new()
+    } else {
+        repo_result
+            .as_ref()
+            .map(|r| get_base_feature_contents(r))
+            .unwrap_or_default()
+    };
+
+    let diff_features: Vec<&(String, String)> = if is_main || base_features.is_empty() {
+        all_features.iter().collect()
+    } else {
+        all_features.iter().filter(|(path, content)| {
+            let filename = std::path::Path::new(path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            base_features.get(&filename).map_or(true, |base_content| base_content != content)
+        }).collect()
+    };
+
+    let proofs = implementation_proofs.unwrap_or_default();
+    // Convert base_features HashMap<filename, content> → [{path, content}] using canonical paths
+    let base_features_vec: Vec<serde_json::Value> = base_features.iter()
+        .map(|(name, content)| serde_json::json!({
+            "path": format!(".vibe/features/{}", name),
+            "content": content
+        }))
+        .collect();
+    let body = serde_json::json!({
+        "title": format!("Branch: {}", branch),
+        "headBranch": branch,
+        "author": "Vibe Studio",
+        "features": diff_features.iter().map(|(path, content)| serde_json::json!({ "path": path, "content": content })).collect::<Vec<_>>(),
+        "baseFeatures": base_features_vec,
+        "decisionsChanged": diff_features.len(),
+        "implementationProofs": proofs.iter().map(|f| serde_json::json!({ "path": f.path, "content": f.content })).collect::<Vec<_>>()
+    });
+
+    let url = format!("{}/api/projects/{}/{}/prs", base, owner, repo);
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(&url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| e.to_string())?;
+    if !status.is_success() {
+        let err: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({ "error": text }));
+        let msg = err.get("error").and_then(|v| v.as_str()).unwrap_or(&text);
+        return Err(format!("{}: {}", status, msg));
+    }
+    let pr: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    let pr_id = pr.get("id").and_then(|v| v.as_str()).ok_or("API did not return pr id")?;
+    let pr_url = format!("{}/{}/{}/pulls/{}", base, owner, repo, pr_id);
+    Ok(PushResult { pr_id: pr_id.to_string(), url: pr_url })
+}
+
+/// Pull the current main-branch vibe files from the web backend.
+/// Overwrites local .vibe/features/ with the merged state, then commits to git.
+/// Returns the refreshed list of local feature files.
+#[tauri::command]
+pub async fn pull_from_remote(root: String) -> Result<Vec<VibeFileEntry>, String> {
+    let root_path = PathBuf::from(&root);
+    let remote_path = root_path.join(".vibe").join("remote.json");
+    let raw = fs::read_to_string(&remote_path)
+        .map_err(|_| "NO_REMOTE: No .vibe/remote.json. Run Push first to configure the remote.")?;
+    let remote: serde_json::Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    let owner = remote.get("owner").and_then(|v| v.as_str()).ok_or("remote.json must have \"owner\"")?;
+    let repo = remote.get("repo").and_then(|v| v.as_str()).ok_or("remote.json must have \"repo\"")?;
+    let web_url = remote.get("webUrl").and_then(|v| v.as_str()).unwrap_or("http://localhost:3000");
+    let base = web_url.trim_end_matches('/');
+
+    // Fetch merged feature files from the web backend
+    let url = format!("{}/api/projects/{}/{}/features", base, owner, repo);
+    let client = reqwest::Client::new();
+    let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| e.to_string())?;
+    if !status.is_success() {
+        let err: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({ "error": text }));
+        let msg = err.get("error").and_then(|v| v.as_str()).unwrap_or(&text);
+        return Err(format!("{}: {}", status, msg));
+    }
+
+    let files: Vec<serde_json::Value> = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    if files.is_empty() {
+        return Err("No vibe files found on the remote for this project. Merge a PR first.".to_string());
+    }
+
+    // Write each feature file to disk
+    let features_dir = root_path.join(".vibe").join("features");
+    fs::create_dir_all(&features_dir).map_err(|e| e.to_string())?;
+
+    let mut written: Vec<VibeFileEntry> = Vec::new();
+    for file in &files {
+        let path = file.get("path").and_then(|v| v.as_str()).unwrap_or_default();
+        let content = file.get("content").and_then(|v| v.as_str()).unwrap_or_default();
+        if path.is_empty() { continue; }
+        let abs = root_path.join(path);
+        if let Some(parent) = abs.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        fs::write(&abs, content).map_err(|e| e.to_string())?;
+        let name = std::path::Path::new(path)
+            .file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+        written.push(VibeFileEntry { name, path: path.to_string(), content: content.to_string() });
+    }
+
+    // Commit the pulled changes to git (best-effort — don't fail if git isn't set up)
+    let _ = std::process::Command::new("git")
+        .args(["add", ".vibe/features/"])
+        .current_dir(&root_path)
+        .output();
+    let _ = std::process::Command::new("git")
+        .args(["commit", "-m", &format!("chore: pull merged vibes from {}/{} main", owner, repo)])
+        .current_dir(&root_path)
+        .output();
+
+    Ok(written)
+}
+
 // ─── AI Commands ──────────────────────────────────────────────────────────────
 
 const CODEGEN_MODEL: &str = "gemini-2.5-flash-lite";
@@ -605,6 +1040,58 @@ fn read_mapped_files(root: &std::path::Path, globs: &[String]) -> Vec<(String, S
         }
     }
     out
+}
+
+/// True if path has a TypeScript/JavaScript extension.
+fn path_is_ts_js(path: &str) -> bool {
+    path.ends_with(".ts") || path.ends_with(".tsx") || path.ends_with(".js")
+}
+
+/// True if path has a non-TS extension we treat as "other language" (py, go, rs).
+fn path_is_other_lang(path: &str) -> bool {
+    path.ends_with(".py") || path.ends_with(".go") || path.ends_with(".rs")
+}
+
+/// True if content looks like Python (so we can fix wrong .ts paths when spec asked for Python).
+fn content_looks_python(content: &str) -> bool {
+    let trim = content.trim();
+    trim.starts_with("import ") || trim.starts_with("from ")
+        || trim.starts_with("def ") || trim.starts_with("class ")
+        || (trim.starts_with("#") && (trim.contains("python") || trim.contains("Python")))
+}
+
+/// If the model returned a .ts/.tsx path but content is Python and we asked for py, rewrite path to .py.
+fn normalize_output_path(rel_path: &str, content: &str, preferred_ext: &str) -> String {
+    if preferred_ext != "py" {
+        return rel_path.to_string();
+    }
+    if !path_is_ts_js(rel_path) {
+        return rel_path.to_string();
+    }
+    if !content_looks_python(content) {
+        return rel_path.to_string();
+    }
+    let stem = rel_path
+        .trim_end_matches(".ts")
+        .trim_end_matches(".tsx")
+        .trim_end_matches(".js");
+    format!("{}.py", stem)
+}
+
+/// If the spec describes an interactive/UI app (calculator, user input, buttons), return instructions so the model doesn't generate auto-running demos or print state to stdout.
+fn interactive_app_instruction(content: &str) -> &'static str {
+    let lower = content.to_lowercase();
+    let is_interactive = lower.contains("interactive")
+        || lower.contains("calculator")
+        || lower.contains("user input")
+        || lower.contains("user interface")
+        || (lower.contains("button") && (lower.contains("press") || lower.contains("click")))
+        || (lower.contains("display") && lower.contains("update"));
+    if is_interactive {
+        "CRITICAL: The spec asks for an INTERACTIVE app (user-driven). The app must wait for user input (clicks, keypresses, etc.) and must NOT auto-run a sequence of operations or simulate button presses. Do NOT print calculator state or results to stdout/terminal — use the UI (window, DOM, GUI) for all display. The program should start, show the UI, and then block on user events only."
+    } else {
+        ""
+    }
 }
 
 /// Detect preferred output language from vibe spec text (e.g. "python only", "written in python", "in TypeScript").
@@ -714,30 +1201,55 @@ pub async fn compile_vibes(root: String) -> Result<String, String> {
         }
 
         let existing = read_mapped_files(&root_path, &globs);
-
         let (ext, lang_instruction) = preferred_language_from_vibe(content);
+
+        // Language switch: when spec language and existing files don't match, treat as new file and cull obsolete files so output matches vibes.
+        let paths_to_cull: Vec<String> = if ext != "ts" && ext != "tsx" && ext != "js"
+            && existing.iter().all(|(p, _)| path_is_ts_js(p))
+        {
+            existing.iter().map(|(p, _)| p.clone()).collect()
+        } else if (ext == "ts" || ext == "tsx" || ext == "js")
+            && existing.iter().all(|(p, _)| path_is_other_lang(p))
+        {
+            existing.iter().map(|(p, _)| p.clone()).collect()
+        } else {
+            Vec::new()
+        };
+        let existing: Vec<(String, String)> = if paths_to_cull.is_empty() {
+            existing
+        } else {
+            Vec::new()
+        };
+
+        let interactive_instruction = interactive_app_instruction(content);
+        let interactive_block: String = if interactive_instruction.is_empty() {
+            String::new()
+        } else {
+            format!("{}\n\n", interactive_instruction)
+        };
 
         let prompt = if existing.is_empty() {
             let base_dir = globs[0].trim_end_matches('/').trim_end_matches("/**");
             let base_dir = if base_dir.is_empty() { "src" } else { base_dir };
-            let suggested_path = format!("{}/{}", base_dir, if name.is_empty() { "index" } else { name });
-            let suggested_path = format!("{}.{}", suggested_path.trim_end_matches('.'), ext);
             format!(
-                r#"You are a senior software engineer. Create NEW code (one file) that implements this specification.
-There is no existing code yet — generate an initial implementation.
+                r#"You are a senior software engineer. Create NEW code that implements this specification.
+There is no existing code yet — generate one or more files that work together (imports, entry points, etc.).
 {}.
+{}Do NOT derive file names from the vibe document name (e.g. "overview.md"). Name files by the feature's purpose and use conventional, best-practice naming for the language and project (e.g. calculator.py, components/Calculator.tsx, or domain-based structure). Place all files under {}/.
 
 ## Vibe Specification
 ```markdown
 {}
 ```
 
-Respond with ONLY a valid JSON array with exactly one object:
-[{{"filePath":"{}","content":"<full file content>"}}]
-Use the exact filePath above. No markdown fences."#,
+Respond with ONLY a valid JSON array of one or more objects:
+[{{"filePath":"<path under {}>","content":"<full file content>"}}, ...]
+Use forward slashes in paths. All files must work together. No markdown fences."#,
                 lang_instruction,
+                interactive_block,
+                base_dir,
                 content,
-                suggested_path
+                base_dir
             )
         } else {
             let files_block: String = existing
@@ -747,6 +1259,7 @@ Use the exact filePath above. No markdown fences."#,
             format!(
                 r#"You are a senior software engineer. Update the existing code to implement this specification.
 {}.
+{}You may modify one or more of the existing files and/or add new files under the same directory structure. All output files must work together (correct imports, exports, entry points). Use conventional file names for any new files (feature/domain-based, not the vibe document name).
 
 ## Vibe Specification
 ```markdown
@@ -756,10 +1269,11 @@ Use the exact filePath above. No markdown fences."#,
 ## Existing Code
 {}
 
-Respond with ONLY a valid JSON array:
-[{{"filePath":"<exact path>","content":"<full updated file content>"}}]
+Respond with ONLY a valid JSON array of objects for every file you change or add:
+[{{"filePath":"<exact path>","content":"<full file content>"}}, ...]
 Return [] if no changes needed. No markdown fences."#,
                 lang_instruction,
+                interactive_block,
                 content,
                 files_block
             )
@@ -770,6 +1284,7 @@ Return [] if no changes needed. No markdown fences."#,
                 match parse_codegen_response(&text) {
                     Ok(files) => {
                         for (rel_path, file_content) in files {
+                            let rel_path = normalize_output_path(&rel_path, &file_content, ext);
                             let abs = root_path.join(&rel_path);
                             if let Some(parent) = abs.parent() {
                                 let _ = fs::create_dir_all(parent);
@@ -777,6 +1292,10 @@ Return [] if no changes needed. No markdown fences."#,
                             if fs::write(&abs, &file_content).is_ok() {
                                 generated += 1;
                             }
+                        }
+                        // Cull obsolete files so output matches vibes (e.g. remove .ts when we switched to .py).
+                        for path in &paths_to_cull {
+                            let _ = fs::remove_file(root_path.join(path));
                         }
                     }
                     Err(e) => errors.push(format!("{}: parse error: {}", name, e)),
@@ -893,4 +1412,90 @@ pub async fn chat_with_vibes(
         }
     };
     Ok(text)
+}
+
+/// Apply the assistant's suggested edits to the vibe markdown file. Calls the model to produce the full updated file content, writes it to disk, and returns the new content.
+#[tauri::command]
+pub async fn apply_chat_to_vibe_file(
+    root: String,
+    feature_name: String,
+    current_content: String,
+    last_assistant_message: String,
+) -> Result<String, String> {
+    let api_key = std::env::var("GEMINI_API_KEY")
+        .map_err(|_| "GEMINI_API_KEY not set. Set it in .env and run with `make desktop`.")?;
+
+    let client = reqwest::Client::new();
+    let url = format!(
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key={api_key}"
+    );
+
+    let prompt = format!(
+        r#"You are applying suggested edits to a Vibe (feature specification) markdown file. The user asked for changes in chat and the assistant replied with a suggestion. Your task is to output the COMPLETE updated file content that applies that suggestion.
+
+Current file content:
+```markdown
+{}
+```
+
+Assistant's suggestion (what the user should change):
+```
+{}
+```
+
+Output ONLY the complete updated markdown file content. No code fences, no "Here is the updated content", no explanation. Just the raw markdown that should be written to the file."#,
+        current_content,
+        last_assistant_message
+    );
+
+    let body = serde_json::json!({
+        "contents": [{ "role": "user", "parts": [{ "text": prompt }] }]
+    });
+
+    let resp = client
+        .post(&url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+
+    if let Some(err_obj) = json.get("error") {
+        let msg = err_obj
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Unknown API error");
+        return Err(format!("Gemini API error: {}", msg));
+    }
+
+    let text = json
+        .get("candidates")
+        .and_then(|c| c.as_array())
+        .and_then(|c| c.first())
+        .and_then(|c| c.get("content"))
+        .and_then(|c| c.get("parts"))
+        .and_then(|p| p.as_array())
+        .and_then(|p| p.first())
+        .and_then(|p| p.get("text"))
+        .and_then(|t| t.as_str())
+        .ok_or_else(|| "No text in model response".to_string())?
+        .to_string();
+
+    // Strip markdown code fences if the model wrapped the output
+    let content = text
+        .trim()
+        .trim_start_matches("```markdown")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim()
+        .to_string();
+
+    let rel_path = format!(".vibe/features/{}.md", feature_name);
+    let abs = PathBuf::from(&root).join(&rel_path);
+    if let Some(parent) = abs.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::write(&abs, &content).map_err(|e| e.to_string())?;
+
+    Ok(content)
 }

@@ -4,8 +4,10 @@
 mod commands;
 
 use commands::{
-    chat_with_vibes, compile_vibes, get_git_state, get_mapped_code, git_checkout,
-    git_create_branch, git_init, list_vibe_features, run_project, write_vibe_file, RunState,
+    apply_chat_to_vibe_file, chat_with_vibes, compile_vibes, get_git_state, get_mapped_code,
+    git_checkout, git_create_branch, git_init, list_vibe_features, load_chats,
+    merge_branch_locally, pull_from_remote, push_branch_to_backend, run_project, save_chats,
+    write_vibe_file, write_remote_config, RunState,
 };
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -25,7 +27,14 @@ pub fn run() {
             git_init,
             compile_vibes,
             chat_with_vibes,
+            apply_chat_to_vibe_file,
+            push_branch_to_backend,
+            pull_from_remote,
+            save_chats,
+            load_chats,
+            write_remote_config,
             run_project,
+            merge_branch_locally,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -52,7 +52,7 @@ export default function ReviewThread({ prId, initialComments }: Props) {
             <div className="flex-1 bg-canvas-subtle border border-border rounded-lg overflow-hidden">
               <div className="flex items-center justify-between px-4 py-2 border-b border-border">
                 <span className="text-sm font-medium text-fg">{c.author}</span>
-                <span className="text-xs text-fg-muted">{new Date(c.createdAt).toLocaleString()}</span>
+                <span className="text-xs text-fg-muted" suppressHydrationWarning>{new Date(c.createdAt).toLocaleString()}</span>
               </div>
               <div className="px-4 py-3 text-sm text-fg whitespace-pre-wrap">{c.content}</div>
               <div className="flex items-center gap-3 px-4 py-2 border-t border-border text-xs text-fg-muted">

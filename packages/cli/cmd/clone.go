@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -38,6 +39,14 @@ var cloneCmd = &cobra.Command{
 		if err := p.Init(repo); err != nil {
 			return err
 		}
+		webURL := os.Getenv("VIBEHUB_WEB_URL")
+		if webURL == "" {
+			webURL = "http://localhost:3000"
+		}
+		remote := map[string]string{"owner": owner, "repo": repo, "webUrl": webURL}
+		remotePath := filepath.Join(target, ".vibe", "remote.json")
+		raw, _ := json.MarshalIndent(remote, "", "  ")
+		_ = os.WriteFile(remotePath, raw, 0o644)
 		abs, _ := filepath.Abs(target)
 		color.Green("✔ Cloned %s → %s", ownerRepo, abs)
 		fmt.Fprintf(os.Stderr, "  Open in Vibe Studio: Open Project → %s\n", abs)

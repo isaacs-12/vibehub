@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getStore } from '@/lib/data/store';
+import type { CompileJob } from '@/lib/data/store';
 
 interface Params { params: { owner: string; repo: string } }
 
@@ -19,18 +20,41 @@ export async function POST(request: Request, { params }: Params) {
   if (!body?.title) return NextResponse.json({ error: 'title is required' }, { status: 400 });
 
   const now = new Date().toISOString();
+  const headBranch = body.headBranch ?? 'feature/unnamed';
+  const isFeatureEntry = (f: unknown) => f && typeof f === 'object' && 'path' in f && 'content' in f;
+  const features: { path: string; content: string }[] = Array.isArray(body.features)
+    ? body.features.filter(isFeatureEntry)
+    : [];
+  const baseFeatures: { path: string; content: string }[] = Array.isArray(body.baseFeatures)
+    ? body.baseFeatures.filter(isFeatureEntry)
+    : [];
+  const implementationProofs: { path: string; content: string }[] = Array.isArray(body.implementationProofs)
+    ? body.implementationProofs.filter(isFeatureEntry)
+    : [];
+
+  const hasIntent = features.length > 0 || implementationProofs.length > 0;
   const pr = {
     id: crypto.randomUUID(),
     projectId: project.id,
     title: body.title,
     author: body.author ?? 'anonymous',
     status: 'open' as const,
-    headBranch: body.headBranch ?? 'feature/unnamed',
-    decisionsChanged: body.decisionsChanged ?? 0,
+    headBranch,
+    decisionsChanged: body.decisionsChanged ?? features.length,
     createdAt: now,
     updatedAt: now,
+    intentDiff: hasIntent ? {
+      baseFeatures: baseFeatures.length > 0 ? baseFeatures : undefined,
+      headFeatures: features.length > 0 ? features : undefined,
+      implementationProofs: implementationProofs.length > 0 ? implementationProofs : undefined,
+    } : undefined,
   };
 
   await getStore().upsertPR(pr);
+
+  // Enqueue a cloud compile job so the agent can produce robust implementation proofs.
+  const job: CompileJob = { id: crypto.randomUUID(), prId: pr.id, status: 'pending', createdAt: now };
+  await getStore().createCompileJob(job);
+
   return NextResponse.json(pr, { status: 201 });
 }

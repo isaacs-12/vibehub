@@ -1,13 +1,44 @@
 import React from 'react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { GitPullRequest, Settings, Zap, Plus, FolderOpen } from 'lucide-react';
+import { GitPullRequest, Settings, Plus, FolderOpen } from 'lucide-react';
 import { getStore } from '@/lib/data/store';
-import FeatureMap from '@/components/FeatureMap/FeatureMap';
-import type { FeatureNode } from '@/components/FeatureMap/FeatureMap';
 
 interface Props {
   params: { owner: string; repo: string };
+}
+
+/** Extract a human-readable title and blurb from a feature's markdown content. */
+function featureInfo(name: string, content: string): { title: string; blurb: string } {
+  const lines = content.split('\n');
+
+  // Title: first # heading, or humanize the slug
+  let title = name.replace(/-/g, ' ');
+  title = title.charAt(0).toUpperCase() + title.slice(1);
+  for (const line of lines) {
+    const m = line.match(/^#\s+(.+)/);
+    if (m) { title = m[1]; break; }
+  }
+
+  // Blurb: first non-empty, non-heading line after the first heading
+  let blurb = '';
+  let pastHeading = false;
+  for (const line of lines) {
+    const t = line.trim();
+    if (t.startsWith('#')) { pastHeading = true; continue; }
+    if (pastHeading && t && !t.startsWith('##') && !t.startsWith('*') && !t.startsWith('-')) {
+      blurb = t.slice(0, 120);
+      break;
+    }
+  }
+
+  return { title, blurb };
+}
+
+function statusLabel(status: string) {
+  if (status === 'open') return { label: 'In review', cls: 'text-success bg-success/10 border-success/20' };
+  if (status === 'merged') return { label: 'Applied', cls: 'text-accent-emphasis bg-accent-subtle border-accent/20' };
+  return { label: status, cls: 'text-fg-muted bg-canvas-subtle border-border' };
 }
 
 export default async function ProjectDashboard({ params }: Props) {
@@ -22,27 +53,20 @@ export default async function ProjectDashboard({ params }: Props) {
     store.listPRs(project.id),
   ]);
 
-  // Map flat features to the tree shape FeatureMap expects
-  const featureNodes: FeatureNode[] = features.map((f) => ({
-    id: f.id,
-    label: f.name,
-    children: [],
-  }));
-
   const recentPRs = prs.slice(0, 5);
 
   return (
     <div className="mx-auto max-w-screen-xl px-4 py-8">
-      {/* Repo header */}
-      <div className="flex items-center justify-between mb-6">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-8">
         <div>
-          <div className="text-sm text-fg-muted mb-1">
-            <Link href="/" className="hover:text-fg">{owner}</Link>
-            <span className="mx-1">/</span>
-            <span className="text-fg font-semibold">{repo}</span>
-          </div>
+          <h1 className="text-xl font-semibold text-fg">
+            {project.description
+              ? project.description.replace(/^\[.*?\]\s*/, '')
+              : `${owner}/${repo}`}
+          </h1>
           {project.description && (
-            <p className="text-sm text-fg-muted">{project.description}</p>
+            <div className="text-xs text-fg-subtle font-mono mt-0.5">{owner}/{repo}</div>
           )}
         </div>
         <div className="flex items-center gap-2">
@@ -51,8 +75,8 @@ export default async function ProjectDashboard({ params }: Props) {
             className="flex items-center gap-1.5 px-3 py-1.5 border border-border text-sm rounded-md hover:bg-canvas-subtle transition-colors"
           >
             <GitPullRequest size={14} />
-            Changes
-            {prs.length > 0 && (
+            Updates
+            {prs.filter((p) => p.status === 'open').length > 0 && (
               <span className="ml-1 bg-canvas text-fg-muted border border-border rounded-full px-1.5 text-xs">
                 {prs.filter((p) => p.status === 'open').length}
               </span>
@@ -68,59 +92,74 @@ export default async function ProjectDashboard({ params }: Props) {
         </div>
       </div>
 
-      {/* Two-column layout */}
       <div className="grid lg:grid-cols-3 gap-6">
-        {/* Feature Map (2/3) */}
-        <div className="lg:col-span-2 bg-canvas-subtle border border-border rounded-lg overflow-hidden">
-          <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-            <div className="flex items-center gap-2 font-semibold text-sm text-fg">
-              <Zap size={14} className="text-accent-emphasis" />
-              Feature Map
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-fg-muted">{featureNodes.length} features</span>
-            </div>
+        {/* Feature cards (2/3) */}
+        <div className="lg:col-span-2">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold text-fg">Your project</h2>
+            <Link
+              href={`/${owner}/${repo}/pulls/new`}
+              className="flex items-center gap-1 text-xs text-accent-emphasis hover:underline"
+            >
+              <Plus size={11} /> Describe a change
+            </Link>
           </div>
 
-          {featureNodes.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-64 text-center gap-3 p-6">
+          {features.length === 0 ? (
+            <div className="border border-border rounded-xl flex flex-col items-center justify-center py-16 text-center gap-3">
               <div className="text-5xl opacity-20">◈</div>
               <p className="text-sm text-fg-muted">Nothing here yet.</p>
               <p className="text-xs text-fg-subtle max-w-xs">
-                Describe what you want to build — open a Change to get started.
+                Describe what you want to build and the AI will start working on it.
               </p>
               <Link
                 href={`/${owner}/${repo}/pulls/new`}
-                className="text-xs text-accent-emphasis hover:underline"
+                className="mt-1 text-xs text-accent-emphasis hover:underline"
               >
                 + Describe a change
               </Link>
             </div>
           ) : (
-            <div className="h-96">
-              <FeatureMap features={featureNodes} />
+            <div className="grid gap-3 sm:grid-cols-2">
+              {features.map((f) => {
+                const { title, blurb } = featureInfo(f.name, f.content);
+                return (
+                  <div
+                    key={f.id}
+                    className="bg-canvas-subtle border border-border rounded-xl p-4 hover:border-accent/40 transition-colors"
+                  >
+                    <div className="font-medium text-sm text-fg mb-1">{title}</div>
+                    {blurb && (
+                      <p className="text-xs text-fg-muted line-clamp-2">{blurb}</p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
 
-        {/* Stats sidebar (1/3) */}
+        {/* Sidebar (1/3) */}
         <div className="space-y-4">
-          {/* Open locally */}
-          <div className="bg-canvas-subtle border border-border rounded-lg overflow-hidden">
+          {/* Open in desktop */}
+          <div className="bg-canvas-subtle border border-border rounded-xl overflow-hidden">
             <div className="px-4 py-3 border-b border-border flex items-center gap-2 text-sm font-semibold text-fg">
               <FolderOpen size={14} className="text-accent-emphasis" />
               Open in Vibe Studio
             </div>
             <div className="px-4 py-3 text-xs text-fg-muted space-y-2">
               <p>Use the desktop app to edit features, run the AI, and preview your project locally.</p>
-              <p className="text-fg-subtle">In Vibe Studio, choose <strong className="text-fg">Open Project</strong> and select your local <strong className="text-fg">{owner}/{repo}</strong> folder.</p>
+              <p className="text-fg-subtle">
+                In Vibe Studio, choose <strong className="text-fg">Open Project</strong> and select your local{' '}
+                <strong className="text-fg">{owner}/{repo}</strong> folder.
+              </p>
             </div>
           </div>
 
-          {/* Recent Changes */}
-          <div className="bg-canvas-subtle border border-border rounded-lg overflow-hidden">
+          {/* Recent updates */}
+          <div className="bg-canvas-subtle border border-border rounded-xl overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-              <span className="text-sm font-semibold text-fg">Recent Changes</span>
+              <span className="text-sm font-semibold text-fg">Recent updates</span>
               <Link
                 href={`/${owner}/${repo}/pulls/new`}
                 className="text-xs text-accent-emphasis hover:underline flex items-center gap-1"
@@ -129,21 +168,25 @@ export default async function ProjectDashboard({ params }: Props) {
               </Link>
             </div>
             {recentPRs.length === 0 ? (
-              <div className="px-4 py-4 text-xs text-fg-muted text-center">No changes yet.</div>
+              <div className="px-4 py-4 text-xs text-fg-muted text-center">No updates yet.</div>
             ) : (
               <div className="divide-y divide-border">
-                {recentPRs.map((pr) => (
-                  <Link
-                    key={pr.id}
-                    href={`/${owner}/${repo}/pulls/${pr.id}`}
-                    className="block px-4 py-2.5 hover:bg-canvas-inset transition-colors"
-                  >
-                    <div className="text-xs text-fg line-clamp-1">{pr.title}</div>
-                    <div className="text-xs text-fg-muted mt-0.5">
-                      #{pr.id.slice(0, 8)} · {pr.author} · {pr.status}
-                    </div>
-                  </Link>
-                ))}
+                {recentPRs.map((pr) => {
+                  const { label, cls } = statusLabel(pr.status);
+                  return (
+                    <Link
+                      key={pr.id}
+                      href={`/${owner}/${repo}/pulls/${pr.id}`}
+                      className="block px-4 py-2.5 hover:bg-canvas-inset transition-colors"
+                    >
+                      <div className="text-xs text-fg line-clamp-1">{pr.title}</div>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${cls}`}>{label}</span>
+                        <span className="text-[10px] text-fg-subtle">{pr.author}</span>
+                      </div>
+                    </Link>
+                  );
+                })}
               </div>
             )}
           </div>

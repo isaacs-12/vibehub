@@ -1,7 +1,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { GitPullRequest, GitMerge, MessageSquare, CheckCircle2, Code2, Zap, Loader2, XCircle } from 'lucide-react';
+import { GitPullRequest, GitMerge, MessageSquare, CheckCircle2, Code2, Loader2, XCircle } from 'lucide-react';
 import { getStore } from '@/lib/data/store';
 import IntentDiff from '@/components/VibePR/IntentDiff';
 import ImplementationProofs from '@/components/VibePR/ImplementationProofs';
@@ -31,7 +31,7 @@ export default async function VibePRPage({ params }: Props) {
       <div className="text-sm text-fg-muted mb-4">
         <Link href={`/${owner}/${repo}`} className="hover:text-fg">{owner}/{repo}</Link>
         {' / '}
-        <Link href={`/${owner}/${repo}/pulls`} className="hover:text-fg">Pull Requests</Link>
+        <Link href={`/${owner}/${repo}/pulls`} className="hover:text-fg">Updates</Link>
         {' / '}
         <span className="text-fg">#{id.slice(0, 8)}</span>
       </div>
@@ -52,26 +52,16 @@ export default async function VibePRPage({ params }: Props) {
               {pr.status}
             </span>
             <span className="text-fg-muted">
-              {pr.author} {pr.status === 'merged' ? 'merged' : 'wants to merge'} into{' '}
-              <code className="bg-canvas-subtle px-1 rounded">main</code>
-              {' '}from{' '}
-              <code className="bg-canvas-subtle px-1 rounded">{pr.headBranch}</code>
+              proposed by <strong className="text-fg">{pr.author}</strong>
             </span>
-            {pr.decisionsChanged > 0 && (
-              <span className="flex items-center gap-1 text-fg-muted">
-                <Zap size={12} className="text-accent-emphasis" />
-                {pr.decisionsChanged} decision{pr.decisionsChanged !== 1 ? 's' : ''} changed
-              </span>
-            )}
           </div>
         </div>
         {pr.status === 'open' && (
           <MergeButton prId={pr.id} headBranch={pr.headBranch} />
         )}
         {pr.status === 'merged' && (
-          <div className="text-xs text-fg-muted bg-accent-subtle border border-accent/30 rounded-lg px-3 py-2 text-right">
-            <div className="font-medium text-accent-emphasis mb-0.5">Merged</div>
-            <div>Pull locally: <code className="bg-canvas-subtle px-1 rounded">git merge {pr.headBranch}</code></div>
+          <div className="text-xs text-fg-muted bg-accent-subtle border border-accent/30 rounded-lg px-3 py-2">
+            <div className="font-medium text-accent-emphasis">Applied</div>
           </div>
         )}
       </div>
@@ -80,11 +70,11 @@ export default async function VibePRPage({ params }: Props) {
       <div className="flex border-b border-border mb-6 text-sm">
         <div className="flex items-center gap-1.5 px-4 py-2 border-b-2 border-accent text-fg font-medium">
           <CheckCircle2 size={12} />
-          Intent Diff
+          What changed
         </div>
         <div className="flex items-center gap-1.5 px-4 py-2 border-b-2 border-transparent text-fg-muted">
           <Code2 size={12} />
-          Implementation Proofs
+          Generated code
         </div>
         <div className="flex items-center gap-1.5 px-4 py-2 border-b-2 border-transparent text-fg-muted">
           <MessageSquare size={12} />
@@ -102,7 +92,7 @@ export default async function VibePRPage({ params }: Props) {
       <div className="mt-8">
         <div className="flex items-center gap-2 text-sm text-fg-muted mb-3">
           <Code2 size={14} />
-          <span>Implementation Proofs</span>
+          <span>Generated code</span>
           <span className="bg-canvas-subtle border border-border text-xs px-1.5 py-0.5 rounded ml-1">AI-generated</span>
           {compileJob && compileJob.status === 'pending' && (
             <span className="flex items-center gap-1 text-xs text-fg-muted ml-2">

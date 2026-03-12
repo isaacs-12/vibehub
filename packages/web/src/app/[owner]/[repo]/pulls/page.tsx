@@ -1,7 +1,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { GitPullRequest, Zap } from 'lucide-react';
+import { GitPullRequest } from 'lucide-react';
 import { getStore } from '@/lib/data/store';
 
 interface Props {
@@ -24,24 +24,24 @@ export default async function PullRequestsPage({ params }: Props) {
           <div className="text-sm text-fg-muted mb-1">
             <Link href={`/${owner}/${repo}`} className="hover:text-fg">{owner}/{repo}</Link>
             {' / '}
-            <span className="text-fg">Pull Requests</span>
+            <span className="text-fg">Updates</span>
           </div>
-          <h1 className="font-semibold text-fg">Vibe Pull Requests</h1>
+          <h1 className="font-semibold text-fg">Updates</h1>
         </div>
         <Link
           href={`/${owner}/${repo}/pulls/new`}
           className="px-3 py-1.5 bg-accent text-white text-sm rounded-md hover:bg-accent/80 transition-colors"
         >
-          New Vibe PR
+          Describe an update
         </Link>
       </div>
 
       {prs.length === 0 ? (
         <div className="border border-border rounded-lg px-6 py-12 text-center">
           <GitPullRequest size={32} className="text-fg-subtle mx-auto mb-3" />
-          <p className="text-sm text-fg-muted mb-1">No pull requests yet.</p>
+          <p className="text-sm text-fg-muted mb-1">No updates yet.</p>
           <p className="text-xs text-fg-subtle">
-            Open a Vibe PR to propose changes to the feature specifications for this project.
+            Describe a change to your project to get started.
           </p>
         </div>
       ) : (
@@ -61,16 +61,10 @@ export default async function PullRequestsPage({ params }: Props) {
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium text-fg hover:text-accent-emphasis">{pr.title}</div>
                 <div className="text-xs text-fg-muted mt-0.5">
-                  #{pr.id.slice(0, 8)} opened by {pr.author}
+                  by {pr.author}
                 </div>
               </div>
               <div className="flex items-center gap-3 text-xs text-fg-muted shrink-0">
-                {pr.decisionsChanged > 0 && (
-                  <span className="flex items-center gap-1">
-                    <Zap size={11} className="text-accent-emphasis" />
-                    {pr.decisionsChanged} decisions
-                  </span>
-                )}
                 <span className={`px-1.5 py-0.5 rounded-full border text-xs ${
                   pr.status === 'open'
                     ? 'border-success/30 text-success bg-success/10'
@@ -78,7 +72,7 @@ export default async function PullRequestsPage({ params }: Props) {
                     ? 'border-accent/30 text-accent-emphasis bg-accent-subtle'
                     : 'border-border text-fg-muted'
                 }`}>
-                  {pr.status}
+                  {pr.status === 'open' ? 'In review' : pr.status === 'merged' ? 'Applied' : pr.status}
                 </span>
               </div>
             </Link>

@@ -20,6 +20,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
+import { parseVibeGrammar, fromGrammarName } from './vibeGrammar.ts';
 
 const MODEL = process.env.AGENT_MODEL ?? 'claude-sonnet-4-6';
 const MAX_ITERATIONS = 10;
@@ -194,17 +195,48 @@ export async function runCompileJob(headFeatures: CodeFile[]): Promise<CodeFile[
   if (headFeatures.length === 0) return [];
 
   const provider = createProvider();
-  const vibeContext = headFeatures
-    .map(({ path: p, content }) => `### ${p}\n\`\`\`markdown\n${content}\n\`\`\``)
-    .join('\n\n');
+
+  // Build a name→content map for dependency resolution via Uses: grammar.
+  const featureBySlug = new Map(
+    headFeatures.map(({ path: p, content }) => {
+      const slug = p.replace(/^\.vibe[/\\]features[/\\]/, '').replace(/\.md$/, '');
+      return [slug, content];
+    }),
+  );
+
+  // Collect all Never constraints across features for the system prompt.
+  const neverConstraints: string[] = [];
+  for (const { content } of headFeatures) {
+    const { grammar } = parseVibeGrammar(content);
+    neverConstraints.push(...grammar.Never);
+  }
+
+  // Build enriched vibe context: each feature includes its Uses dependencies inline.
+  const vibeContext = headFeatures.map(({ path: p, content }) => {
+    const { grammar } = parseVibeGrammar(content);
+    let block = `### ${p}\n\`\`\`markdown\n${content}\n\`\`\``;
+    if (grammar.Uses.length > 0) {
+      const depBlocks = grammar.Uses.flatMap((name) => {
+        const slug = fromGrammarName(name);
+        const depContent = featureBySlug.get(slug);
+        return depContent ? [`#### dependency: ${name}\n\`\`\`markdown\n${depContent}\n\`\`\``] : [];
+      });
+      if (depBlocks.length > 0) block += '\n\n' + depBlocks.join('\n\n');
+    }
+    return block;
+  }).join('\n\n');
+
+  const neverBlock = neverConstraints.length > 0
+    ? `\n\nHARD CONSTRAINTS — never violate these regardless of what the specs say:\n${neverConstraints.map((c) => `- ${c}`).join('\n')}`
+    : '';
 
   // Phase 1: single-shot — generates initial implementation files fast.
-  const initial = await singleShotGenerate(provider, vibeContext);
+  const initial = await singleShotGenerate(provider, vibeContext, neverBlock);
 
   // Phase 2: agentic loop — validates and fixes the generated code.
   const workspace = await createWorkspace(headFeatures, initial);
   try {
-    return await agentLoop(provider, workspace, vibeContext, initial);
+    return await agentLoop(provider, workspace, vibeContext, initial, neverBlock);
   } finally {
     await cleanupWorkspace(workspace);
   }
@@ -212,7 +244,7 @@ export async function runCompileJob(headFeatures: CodeFile[]): Promise<CodeFile[
 
 // ─── Phase 1: single-shot generation ──────────────────────────────────────────
 
-async function singleShotGenerate(provider: LLMProvider, vibeContext: string): Promise<CodeFile[]> {
+async function singleShotGenerate(provider: LLMProvider, vibeContext: string, neverBlock = ''): Promise<CodeFile[]> {
   const prompt = `You are a senior software engineer implementing a feature based on vibe specifications.
 The vibes below describe the intent — generate production-quality code that fulfils them.
 Return ONLY a valid JSON array: [{"filePath":"<path>","content":"<full file content>"}, ...]
@@ -227,7 +259,7 @@ IMPORTANT: Always include a file at path ".vibe/project.json" that describes how
   "build": "<build command, e.g. npm run build>",
   "test": "<test command, e.g. npm test>"
 }
-
+${neverBlock}
 ## Vibe Specifications
 
 ${vibeContext}`;
@@ -320,6 +352,7 @@ async function agentLoop(
   workspace: string,
   vibeContext: string,
   initialFiles: CodeFile[],
+  neverBlock = '',
 ): Promise<CodeFile[]> {
   const writtenFiles = new Map<string, string>(
     initialFiles.map(({ path: p, content }) => [p, content]),
@@ -331,7 +364,7 @@ async function agentLoop(
     {
       role: 'user',
       content: `You are a senior software engineer validating and fixing an AI-generated implementation.
-
+${neverBlock}
 ## Vibe Specifications (the intended behaviour)
 ${vibeContext}
 

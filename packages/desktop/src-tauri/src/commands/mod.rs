@@ -13,6 +13,80 @@ use walkdir::WalkDir;
 /// Tracks the current run process so we can kill it when starting a new one. Uses Arc so we can pass into spawn.
 pub struct RunState(pub Arc<Mutex<Option<u32>>>);
 
+// ─── Vibe grammar helpers ─────────────────────────────────────────────────────
+
+/// Extract the YAML frontmatter block from a vibe file (content between the first --- delimiters).
+fn extract_frontmatter(content: &str) -> Option<&str> {
+    let content = content.trim_start();
+    if !content.starts_with("---") { return None; }
+    let rest = &content[3..];
+    // Skip the newline after the opening ---
+    let rest = rest.trim_start_matches('\n').trim_start_matches("\r\n");
+    let end = rest.find("\n---")?;
+    Some(&rest[..end])
+}
+
+/// Parse an inline list field from frontmatter: `Uses: [A, B, C]` → ["A", "B", "C"]
+fn parse_fm_inline_list(fm: &str, field: &str) -> Vec<String> {
+    let prefix = format!("{}:", field);
+    for line in fm.lines() {
+        if let Some(rest) = line.strip_prefix(&prefix) {
+            let inner = rest.trim().trim_start_matches('[').trim_end_matches(']');
+            return inner.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+        }
+    }
+    Vec::new()
+}
+
+/// Parse a block list field from frontmatter:
+///   Never:
+///     - item one
+///     - item two
+fn parse_fm_block_list(fm: &str, field: &str) -> Vec<String> {
+    let prefix = format!("{}:", field);
+    let mut in_field = false;
+    let mut items = Vec::new();
+    for line in fm.lines() {
+        if line.starts_with(&prefix) {
+            // Could also be inline: Never: [...]
+            let rest = line[prefix.len()..].trim();
+            if rest.starts_with('[') {
+                let inner = rest.trim_start_matches('[').trim_end_matches(']');
+                items = inner.split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                break;
+            }
+            in_field = true;
+            continue;
+        }
+        if in_field {
+            if let Some(item) = line.trim().strip_prefix("- ") {
+                items.push(item.to_string());
+            } else if !line.starts_with(' ') && !line.trim().is_empty() {
+                break;
+            }
+        }
+    }
+    items
+}
+
+/// Convert a PascalCase grammar name to a kebab-case slug: "UserAuth" → "user-auth"
+fn grammar_name_to_slug(name: &str) -> String {
+    let mut result = String::new();
+    for (i, ch) in name.chars().enumerate() {
+        if ch.is_uppercase() && i > 0 {
+            result.push('-');
+        }
+        result.push(ch.to_lowercase().next().unwrap_or(ch));
+    }
+    result
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -1287,6 +1361,26 @@ pub async fn compile_vibes(root: String) -> Result<String, String> {
         features.push((name, content));
     }
 
+    // Build slug→content map for resolving Uses: dependencies.
+    let feature_map: HashMap<String, String> = features.iter()
+        .map(|(name, content)| (name.clone(), content.clone()))
+        .collect();
+
+    // Collect all Never constraints across all features.
+    let all_never: Vec<String> = features.iter().flat_map(|(_, content)| {
+        extract_frontmatter(content)
+            .map(|fm| parse_fm_block_list(fm, "Never"))
+            .unwrap_or_default()
+    }).collect();
+    let never_block: String = if all_never.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n\nHARD CONSTRAINTS — never violate these regardless of what the specs say:\n{}",
+            all_never.iter().map(|c| format!("- {}", c)).collect::<Vec<_>>().join("\n")
+        )
+    };
+
     if features.is_empty() {
         return Ok("No vibe feature files (.vibe/features/*.md) found.".to_string());
     }
@@ -1348,6 +1442,19 @@ pub async fn compile_vibes(root: String) -> Result<String, String> {
             format!("{}\n\n", interactive_instruction)
         };
 
+        // Build dependency context from Uses: grammar field.
+        let dep_block: String = extract_frontmatter(content)
+            .map(|fm| {
+                let uses = parse_fm_inline_list(fm, "Uses");
+                uses.iter().flat_map(|grammar_name| {
+                    let slug = grammar_name_to_slug(grammar_name);
+                    feature_map.get(&slug).map(|dep_content| {
+                        format!("### dependency: {}\n```markdown\n{}\n```\n\n", grammar_name, dep_content)
+                    })
+                }).collect::<String>()
+            })
+            .unwrap_or_default();
+
         let prompt = if existing.is_empty() {
             let base_dir = globs[0].trim_end_matches('/').trim_end_matches("/**");
             let base_dir = if base_dir.is_empty() { "src" } else { base_dir };
@@ -1355,20 +1462,22 @@ pub async fn compile_vibes(root: String) -> Result<String, String> {
                 r#"You are a senior software engineer. Create NEW code that implements this specification.
 There is no existing code yet — generate one or more files that work together (imports, entry points, etc.).
 {}.
-{}Do NOT derive file names from the vibe document name (e.g. "overview.md"). Name files by the feature's purpose and use conventional, best-practice naming for the language and project (e.g. calculator.py, components/Calculator.tsx, or domain-based structure). Place all files under {}/.
+{}{}Do NOT derive file names from the vibe document name (e.g. "overview.md"). Name files by the feature's purpose and use conventional, best-practice naming for the language and project (e.g. calculator.py, components/Calculator.tsx, or domain-based structure). Place all files under {}/.
 
 ## Vibe Specification
 ```markdown
 {}
 ```
-
+{}
 Respond with ONLY a valid JSON array of one or more objects:
 [{{"filePath":"<path under {}>","content":"<full file content>"}}, ...]
 Use forward slashes in paths. All files must work together. No markdown fences."#,
                 lang_instruction,
                 interactive_block,
+                dep_block,
                 base_dir,
                 content,
+                never_block,
                 base_dir
             )
         } else {
@@ -1379,13 +1488,13 @@ Use forward slashes in paths. All files must work together. No markdown fences."
             format!(
                 r#"You are a senior software engineer. Update the existing code to implement this specification.
 {}.
-{}You may modify one or more of the existing files and/or add new files under the same directory structure. All output files must work together (correct imports, exports, entry points). Use conventional file names for any new files (feature/domain-based, not the vibe document name).
+{}{}You may modify one or more of the existing files and/or add new files under the same directory structure. All output files must work together (correct imports, exports, entry points). Use conventional file names for any new files (feature/domain-based, not the vibe document name).
 
 ## Vibe Specification
 ```markdown
 {}
 ```
-
+{}
 ## Existing Code
 {}
 
@@ -1394,7 +1503,9 @@ Respond with ONLY a valid JSON array of objects for every file you change or add
 Return [] if no changes needed. No markdown fences."#,
                 lang_instruction,
                 interactive_block,
+                dep_block,
                 content,
+                never_block,
                 files_block
             )
         };
@@ -1462,12 +1573,33 @@ pub async fn chat_with_vibes(
         })
         .collect();
 
+    // Extract grammar from the current vibe content for richer context.
+    let grammar_summary = if let Some(fm) = extract_frontmatter(&vibe_context) {
+        let uses = parse_fm_inline_list(fm, "Uses");
+        let data = parse_fm_inline_list(fm, "Data");
+        let never = parse_fm_block_list(fm, "Never");
+        let mut parts = Vec::new();
+        if !uses.is_empty() { parts.push(format!("Uses: {}", uses.join(", "))); }
+        if !data.is_empty() { parts.push(format!("Data: {}", data.join(", "))); }
+        if !never.is_empty() { parts.push(format!("Never: {}", never.join("; "))); }
+        if parts.is_empty() { String::new() } else {
+            format!("\n\nGrammar declared in this feature:\n{}", parts.join("\n"))
+        }
+    } else {
+        String::new()
+    };
+
     let system_context = format!(
         "You are an expert software architect and product manager working inside Vibe Studio. \
          You help users edit their 'Vibe' files — human-readable feature specifications that drive code generation.\n\n\
+         Vibe files use structured grammar frontmatter with three fields:\n\
+         - Uses: [FeatureName, ...] — other features this one depends on (PascalCase names)\n\
+         - Data: [EntityName, ...] — data entities this feature touches (PascalCase names)\n\
+         - Never: constraints the compiler must never violate\n\n\
          Current project root: {root}\n\
-         Current feature: {feature_name}\n\n\
+         Current feature: {feature_name}{grammar_summary}\n\n\
          Current Vibe file content:\n```markdown\n{vibe_context}\n```\n\n\
+         When suggesting changes, preserve and update the grammar frontmatter. \
          When the user asks to update multiple features, respond with the full updated Markdown for each, \
          clearly labeled with the feature name."
     );
@@ -1552,6 +1684,16 @@ pub async fn apply_chat_to_vibe_file(
 
     let prompt = format!(
         r#"You are applying suggested edits to a Vibe (feature specification) markdown file. The user asked for changes in chat and the assistant replied with a suggestion. Your task is to output the COMPLETE updated file content that applies that suggestion.
+
+Vibe files use structured grammar frontmatter with three PascalCase fields:
+- Uses: [FeatureName, ...] — dependencies on other features
+- Data: [EntityName, ...] — data entities this feature touches
+- Never: constraints the compiler must never violate
+
+Rules:
+1. If the current file has grammar frontmatter (---...---), preserve it and update it to reflect any new dependencies, entities, or constraints implied by the changes.
+2. If the current file has no grammar frontmatter, add it at the top with appropriate values inferred from the content.
+3. All names in Uses and Data must be PascalCase (e.g. UserAuthentication, PaymentMethod).
 
 Current file content:
 ```markdown

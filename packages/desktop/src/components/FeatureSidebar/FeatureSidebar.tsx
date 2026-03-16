@@ -72,7 +72,7 @@ export default function FeatureSidebar() {
     await invoke('write_vibe_file', {
       root: projectRoot,
       relativePath: `.vibe/features/${slug}.md`,
-      content: `# ${slug}\n\n## Overview\n\n## Goals\n\n## Non-Goals\n`,
+      content: `---\nUses: []\nData: []\nNever: []\n---\n\n# ${slug}\n\n## What it does\nDescribe the feature in plain language. What can a user do, and what happens when they do it?\n\n## Behavior\n- Add specific rules, edge cases, or conditions here\n- Each bullet is something the compiler should implement\n\n## Acceptance criteria\n- How do you know this feature is working correctly?\n`,
     });
     await refreshFeatures(projectRoot);
   }

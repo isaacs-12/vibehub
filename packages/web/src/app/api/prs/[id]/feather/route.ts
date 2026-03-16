@@ -34,6 +34,15 @@ Both versions started from the same base and have evolved independently. Your ta
 - Resolves genuine contradictions by choosing the more specific or more recent-sounding intent, or by noting the tension explicitly in the merged document
 - Reads as a coherent, well-structured vibe specification — not a diff or a list of alternatives
 
+Vibe files use structured grammar frontmatter with three PascalCase fields:
+  ---
+  Uses: [FeatureName, ...]   ← dependencies on other features
+  Data: [EntityName, ...]    ← data entities this feature touches
+  Never:
+    - constraint             ← hard compiler constraints
+  ---
+If either version contains grammar frontmatter, the merged output MUST include it. Merge the Uses, Data, and Never lists by taking the union of both sides. All names must remain PascalCase.
+
 ## File name
 ${name}.md
 

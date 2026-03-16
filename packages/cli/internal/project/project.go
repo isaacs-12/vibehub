@@ -62,7 +62,7 @@ func (p *Project) Init(name string) error {
 		return err
 	}
 
-	starterFeature := fmt.Sprintf("# %s\n\n## Overview\nDescribe the core purpose of this project.\n\n## Goals\n- [ ] Define primary goal\n\n## Non-Goals\n- List things explicitly out of scope\n", name)
+	starterFeature := fmt.Sprintf(FeatureTemplate, name)
 	if err := os.WriteFile(filepath.Join(p.root, vibeDir, "features", "overview.md"), []byte(starterFeature), 0o644); err != nil {
 		return err
 	}

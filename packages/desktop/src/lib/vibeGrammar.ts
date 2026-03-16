@@ -1,4 +1,11 @@
 /**
+ * Default content for a new vibe feature file.
+ * The placeholder TOKEN is replaced with the feature slug at creation time.
+ */
+export const FEATURE_TEMPLATE = (slug: string) =>
+  `---\nUses: []\nData: []\nNever: []\n---\n\n# ${slug}\n\n## What it does\nDescribe the feature in plain language. What can a user do, and what happens when they do it?\n\n## Behavior\n- Add specific rules, edge cases, or conditions here\n- Each bullet is something the compiler should implement\n\n## Acceptance criteria\n- How do you know this feature is working correctly?\n`;
+
+/**
  * Vibe grammar: structured frontmatter for feature specs.
  *
  * Format:

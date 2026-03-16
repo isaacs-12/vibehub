@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Plus, ChevronDown, ChevronRight, FileText, Trash2, Pencil, Folder } from 'lucide-react';
 import { useVibeStore, type FeatureNode } from '../../store/index.ts';
+import { FEATURE_TEMPLATE } from '../../lib/vibeGrammar.ts';
 
 // ─── Tree builder ──────────────────────────────────────────────────────────────
 
@@ -72,7 +73,7 @@ export default function FeatureSidebar() {
     await invoke('write_vibe_file', {
       root: projectRoot,
       relativePath: `.vibe/features/${slug}.md`,
-      content: `---\nUses: []\nData: []\nNever: []\n---\n\n# ${slug}\n\n## What it does\nDescribe the feature in plain language. What can a user do, and what happens when they do it?\n\n## Behavior\n- Add specific rules, edge cases, or conditions here\n- Each bullet is something the compiler should implement\n\n## Acceptance criteria\n- How do you know this feature is working correctly?\n`,
+      content: FEATURE_TEMPLATE(slug),
     });
     await refreshFeatures(projectRoot);
   }

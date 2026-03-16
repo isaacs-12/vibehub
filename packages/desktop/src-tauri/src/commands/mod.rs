@@ -100,6 +100,17 @@ pub async fn delete_vibe_file(root: String, relative_path: String) -> Result<(),
     fs::remove_file(&abs).map_err(|e| e.to_string())
 }
 
+/// Kill the currently running project process, if any.
+#[tauri::command]
+pub async fn stop_project(run_state: State<'_, RunState>) -> Result<(), String> {
+    let mut guard = run_state.0.lock().await;
+    if let Some(pid) = *guard {
+        kill_pid(pid);
+        *guard = None;
+    }
+    Ok(())
+}
+
 /// Rename (move) a vibe file. Creates parent directories for the new path if needed.
 #[tauri::command]
 pub async fn rename_vibe_file(

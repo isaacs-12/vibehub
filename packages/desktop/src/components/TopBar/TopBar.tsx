@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Zap, MessageSquare, FolderOpen, Loader2, Play, Code2 } from 'lucide-react';
+import { Zap, MessageSquare, FolderOpen, Loader2, Play, Square, Code2 } from 'lucide-react';
 import { useVibeStore } from '../../store/index.ts';
 import { useVibeProject } from '../../hooks/useVibeProject.ts';
 
@@ -40,6 +40,16 @@ export default function TopBar() {
       const { message } = await import('@tauri-apps/plugin-dialog');
       await message(String(err), { title: 'Run', kind: 'error' });
     }
+  }
+
+  async function handleStop() {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('stop_project');
+    } catch {
+      // If the process was already gone, just reset the state
+    }
+    setRunInProgress(false);
   }
 
   async function handleVibeCompile() {
@@ -115,14 +125,23 @@ export default function TopBar() {
           <Code2 size={12} />
           Code
         </button>
-        <button
-          onClick={handleRun}
-          disabled={runInProgress}
-          className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-surface-border text-muted hover:text-gray-200 hover:border-gray-500 disabled:opacity-50 transition-colors"
-        >
-          <Play size={12} />
-          {runInProgress ? 'Running…' : 'Run'}
-        </button>
+        {runInProgress ? (
+          <button
+            onClick={handleStop}
+            className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-red-500/50 text-red-400 hover:border-red-400 hover:text-red-300 transition-colors"
+          >
+            <Square size={12} />
+            Stop
+          </button>
+        ) : (
+          <button
+            onClick={handleRun}
+            className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-surface-border text-muted hover:text-gray-200 hover:border-gray-500 transition-colors"
+          >
+            <Play size={12} />
+            Run
+          </button>
+        )}
         <button
           onClick={() => setChatOpen(!chatOpen)}
           className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border transition-colors ${

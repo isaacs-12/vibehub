@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { GitPullRequest, Settings, Plus, FolderOpen } from 'lucide-react';
 import { getStore } from '@/lib/data/store';
+import CloneButton from '@/components/CloneButton/CloneButton';
 
 interface Props {
   params: { owner: string; repo: string };
@@ -70,6 +71,7 @@ export default async function ProjectDashboard({ params }: Props) {
           )}
         </div>
         <div className="flex items-center gap-2">
+          <CloneButton owner={owner} repo={repo} />
           <Link
             href={`/${owner}/${repo}/pulls`}
             className="flex items-center gap-1.5 px-3 py-1.5 border border-border text-sm rounded-md hover:bg-canvas-subtle transition-colors"

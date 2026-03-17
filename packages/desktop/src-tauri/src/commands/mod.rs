@@ -2023,6 +2023,9 @@ pub async fn compile_vibes(root: String) -> Result<String, String> {
             format!("{}\n\n", interactive_instruction)
         };
 
+        // Build integration context from Connects: grammar field.
+        let integration_block = build_integration_context(content, &vibe_dir.join("integrations"));
+
         // Build dependency context from Uses: grammar field.
         let dep_block: String = extract_frontmatter(content)
             .map(|fm| {
@@ -2064,7 +2067,7 @@ There is no existing code yet — generate one or more files that work together 
 {grammar}
 
 {defensive}
-{export_contract}{shared}
+{export_contract}{integrations}{shared}
 ## Vibe Specification
 ```markdown
 {spec}
@@ -2084,6 +2087,7 @@ Use forward slashes. All files must work together. You may update global project
                 grammar = GRAMMAR_CONTEXT,
                 defensive = DEFENSIVE_CODING_RULES,
                 export_contract = export_contract_block,
+                integrations = integration_block,
                 shared = shared_context_block,
                 spec = content,
                 never = never_block,
@@ -2101,7 +2105,7 @@ Use forward slashes. All files must work together. You may update global project
 {grammar}
 
 {defensive}
-{export_contract}{shared}
+{export_contract}{integrations}{shared}
 ## Vibe Specification
 ```markdown
 {spec}
@@ -2122,6 +2126,7 @@ If no changes are needed, output nothing. You may update global project files (i
                 grammar = GRAMMAR_CONTEXT,
                 defensive = DEFENSIVE_CODING_RULES,
                 export_contract = export_contract_block,
+                integrations = integration_block,
                 shared = shared_context_block,
                 spec = content,
                 never = never_block,
@@ -2196,6 +2201,76 @@ If no changes are needed, output nothing. You may update global project files (i
         generated,
         fix_note
     ))
+}
+
+/// Read a .vibe/integrations/{Name}.md (or legacy .yaml) file and return its content.
+/// Returns None if the file doesn't exist.
+fn read_integration_file(integrations_dir: &std::path::Path, service_name: &str) -> Option<String> {
+    let md = integrations_dir.join(format!("{}.md", service_name));
+    let yaml = integrations_dir.join(format!("{}.yaml", service_name));
+    fs::read_to_string(&md).or_else(|_| fs::read_to_string(&yaml)).ok()
+}
+
+/// Parse `requires.env` from an integration .md frontmatter and check each var is set.
+/// Returns (all_set: bool, missing: Vec<String>).
+fn check_integration_env(content: &str) -> (bool, Vec<String>) {
+    let fm = match extract_frontmatter(content) {
+        Some(fm) => fm.to_string(),
+        None => return (true, vec![]),
+    };
+    // Collect env vars from requires.env: [A, B] and auth.env: VAR
+    let mut vars: Vec<String> = parse_fm_inline_list(&fm, "requires.env");
+    for line in fm.lines() {
+        let t = line.trim();
+        if t.starts_with("env:") && !t.contains('[') {
+            if let Some(v) = t.splitn(2, ':').nth(1) {
+                let v = v.trim().trim_matches('"').to_string();
+                if !v.is_empty() && !vars.contains(&v) { vars.push(v); }
+            }
+        }
+    }
+    let missing: Vec<String> = vars.into_iter()
+        .filter(|v| std::env::var(v).map(|s| s.trim().is_empty()).unwrap_or(true))
+        .collect();
+    (missing.is_empty(), missing)
+}
+
+/// Build the integration context block for a feature's codegen prompt.
+/// Reads each service listed in Connects: from .vibe/integrations/, warns if env vars missing.
+fn build_integration_context(
+    content: &str,
+    integrations_dir: &std::path::Path,
+) -> String {
+    let fm = match extract_frontmatter(content) {
+        Some(fm) => fm,
+        None => return String::new(),
+    };
+    let connects = parse_fm_inline_list(fm, "Connects");
+    if connects.is_empty() { return String::new(); }
+
+    let mut block = String::from("\n## External integrations (from .vibe/integrations/)\n");
+    let mut found_any = false;
+    for service in &connects {
+        if let Some(int_content) = read_integration_file(integrations_dir, service) {
+            let (all_set, missing) = check_integration_env(&int_content);
+            found_any = true;
+            if all_set {
+                block.push_str(&format!("### {}\n{}\n\n", service, int_content));
+            } else {
+                block.push_str(&format!(
+                    "### {} ⚠️ MISSING ENV VARS: {}\n\
+                     The following environment variables are not set. Generate code that handles \
+                     missing credentials gracefully (show a configuration prompt rather than crashing):\n{}\n\
+                     {}\n\n",
+                    service,
+                    missing.join(", "),
+                    missing.iter().map(|v| format!("- {}", v)).collect::<Vec<_>>().join("\n"),
+                    int_content
+                ));
+            }
+        }
+    }
+    if found_any { block } else { String::new() }
 }
 
 /// Extract the path string from a JS/TS import statement, e.g.:
@@ -2590,7 +2665,9 @@ Output ONLY the complete updated markdown for **{feature_name}**. No code fences
 #[derive(serde::Serialize)]
 pub struct GeneratedIntegration {
     pub service_name: String,
-    pub yaml: String,
+    /// Full .md file content (YAML frontmatter + prose sections).
+    pub content: String,
+    /// Credential field names that must be filled in by the user (empty in the generated file).
     pub empty_fields: Vec<String>,
 }
 
@@ -2606,86 +2683,95 @@ pub async fn generate_integration(_root: String, description: String) -> Result<
 The user wants to integrate with an external service. Their description:
 "{description}"
 
-Generate a YAML configuration file for this integration. Follow this format exactly:
+Generate an integration spec file in this exact format — YAML frontmatter followed by prose markdown sections:
 
-```yaml
-service: ServiceName          # PascalCase, no spaces
-description: Human-readable description of what this integration does
+---
+service: ServiceName          # PascalCase, no spaces (e.g. Stripe, GoogleSheets, Twilio)
 auth:
-  type: oauth2|api_key|basic|none
-  # include relevant auth fields as empty strings that the user must fill in
-  # e.g. client_id: ""
-  #      client_secret: ""
-config:
-  # any non-secret configuration (endpoints, scopes, etc.)
-  # use concrete values where known, empty strings where user must fill in
+  type: api_key               # one of: api_key | oauth2 | basic | none
+  env: SERVICE_API_KEY        # environment variable name that holds the credential (omit if none)
+requires:
+  env: [SERVICE_API_KEY]      # list every env var the user must set before this works
 operations:
-  - name: OperationName
-    description: What this operation does
-    # up to 3-5 relevant operations for this service
-```
+  - OperationName             # PascalCase, 3-6 key operations for this use case
+  - AnotherOperation
+---
+
+## What it does
+2-3 sentences describing what this integration enables in plain language.
+
+## How to use it
+Concrete instructions for the AI when writing code that uses this integration:
+- Which SDK or library to use (npm package name, import path)
+- How to initialise the client (use process.env.SERVICE_API_KEY, never hardcode)
+- The key API calls to use for each operation listed above
+- Any rate limits, pagination patterns, or gotchas to be aware of
+
+## Never
+- Any hard constraints the AI must never violate when using this integration
+- e.g. never log credentials, never expose secrets to the client, etc.
 
 Rules:
-- Use PascalCase for `service` and operation `name` values
-- Leave credential fields (tokens, secrets, passwords, keys) as empty strings `""`
-- Fill in known public values (API endpoints, scope names, etc.)
-- Only include operations that make sense for the described use case
-- Return ONLY the YAML, no other text or markdown fences
+- Use PascalCase for `service` and operation names
+- The `env` field under `auth` must be the actual environment variable name (e.g. STRIPE_SECRET_KEY)
+- `requires.env` must list every env var the user needs to set
+- The prose sections are for the AI code generator — write them to be maximally useful for that purpose
+- Return ONLY the file content (frontmatter + prose), no surrounding markdown fences
 
-Generate the YAML now:"#
+Generate the integration spec now:"#
     );
 
     let raw = call_gemini(&client, &api_key, &prompt).await?;
 
-    // Strip any accidental code fences
-    let yaml = raw
+    // Strip any accidental outer code fences
+    let content = raw
         .trim()
-        .trim_start_matches("```yaml")
+        .trim_start_matches("```markdown")
         .trim_start_matches("```")
         .trim_end_matches("```")
         .trim()
         .to_string();
 
-    // Extract service name from the yaml
-    let service_name = yaml
-        .lines()
-        .find(|l| l.trim_start().starts_with("service:"))
-        .and_then(|l| l.splitn(2, ':').nth(1))
-        .map(|s| s.trim().trim_matches('"').to_string())
+    // Extract service name from the frontmatter
+    let service_name = extract_frontmatter(&content)
+        .and_then(|fm| {
+            fm.lines()
+                .find(|l| l.trim_start().starts_with("service:"))
+                .and_then(|l| l.splitn(2, ':').nth(1))
+                .map(|s| s.trim().trim_matches('"').to_string())
+        })
         .unwrap_or_else(|| "Integration".to_string());
 
-    // Find empty fields (lines with value `""` or `''` or just `: ` with nothing after)
-    let empty_fields: Vec<String> = yaml
-        .lines()
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            let is_empty = trimmed.ends_with(": \"\"")
-                || trimmed.ends_with(": ''")
-                || trimmed.ends_with(':');
-            if is_empty {
-                let key = trimmed.trim_end_matches(':').trim_end_matches("\"\"").trim_end_matches("''").trim_end_matches(':').trim();
-                // skip the top-level keys that aren't credentials
-                let skip = ["service", "description", "auth", "config", "operations"];
-                if !skip.contains(&key) {
-                    return Some(key.to_string());
-                }
-            }
-            None
-        })
-        .collect();
+    // Extract required env vars from requires.env in the frontmatter
+    let empty_fields: Vec<String> = extract_frontmatter(&content)
+        .map(|fm| parse_fm_inline_list(fm, "requires.env")
+            .into_iter()
+            .chain(
+                // Also pick up auth.env as a single value
+                fm.lines()
+                    .find(|l| l.trim().starts_with("env:") && !l.contains('['))
+                    .and_then(|l| l.splitn(2, ':').nth(1))
+                    .map(|v| v.trim().to_string())
+                    .filter(|v| !v.is_empty())
+                    .into_iter()
+            )
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect())
+        .unwrap_or_default();
 
-    Ok(GeneratedIntegration { service_name, yaml, empty_fields })
+    Ok(GeneratedIntegration { service_name, content, empty_fields })
 }
 
 #[tauri::command]
-pub async fn write_integration_file(root: String, service_name: String, yaml_content: String) -> Result<(), String> {
+pub async fn write_integration_file(root: String, service_name: String, content: String) -> Result<(), String> {
     let path = PathBuf::from(&root)
         .join(".vibe")
         .join("integrations")
-        .join(format!("{}.yaml", service_name));
+        .join(format!("{}.md", service_name));
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    fs::write(&path, yaml_content.as_bytes()).map_err(|e| e.to_string())?;
+    fs::write(&path, content.as_bytes()).map_err(|e| e.to_string())?;
     Ok(())
 }

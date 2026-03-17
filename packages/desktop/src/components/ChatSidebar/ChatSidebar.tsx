@@ -280,7 +280,7 @@ export default function ChatSidebar() {
               appendChatMessage({
                 id: crypto.randomUUID(),
                 role: 'assistant',
-                content: `Integration saved to .vibe/integrations/${serviceName}.yaml. Add \`Connects: [${serviceName}]\` to any feature that uses it.`,
+                content: `Integration saved to .vibe/integrations/${serviceName}.md. Add \`Connects: [${serviceName}]\` to any feature that uses it.`,
               });
             }}
           />

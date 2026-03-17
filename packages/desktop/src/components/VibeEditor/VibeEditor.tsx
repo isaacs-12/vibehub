@@ -311,6 +311,21 @@ export default function VibeEditor() {
   const editorRef = useRef<{ view?: import('@codemirror/view').EditorView } | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('write');
 
+  const EDITOR_FONT_SIZE_KEY = 'vibehub.editorFontSize';
+  const MIN_FONT_SIZE = 10;
+  const MAX_FONT_SIZE = 28;
+  const DEFAULT_FONT_SIZE = 14;
+  const [editorFontSize, setEditorFontSize] = useState(() => {
+    try {
+      const stored = localStorage.getItem(EDITOR_FONT_SIZE_KEY);
+      if (stored != null) {
+        const n = parseInt(stored, 10);
+        if (n >= MIN_FONT_SIZE && n <= MAX_FONT_SIZE) return n;
+      }
+    } catch (_) {}
+    return DEFAULT_FONT_SIZE;
+  });
+
   const handleChange = useCallback(
     (value: string) => updateEditorContent(value),
     [updateEditorContent],
@@ -321,6 +336,31 @@ export default function VibeEditor() {
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
         e.preventDefault();
         await saveFeature();
+        return;
+      }
+      if (e.metaKey || e.ctrlKey) {
+        if (e.key === '=' || e.key === '+') {
+          e.preventDefault();
+          setEditorFontSize((prev) => {
+            const next = Math.min(prev + 1, MAX_FONT_SIZE);
+            try {
+              localStorage.setItem(EDITOR_FONT_SIZE_KEY, String(next));
+            } catch (_) {}
+            return next;
+          });
+          return;
+        }
+        if (e.key === '-') {
+          e.preventDefault();
+          setEditorFontSize((prev) => {
+            const next = Math.max(prev - 1, MIN_FONT_SIZE);
+            try {
+              localStorage.setItem(EDITOR_FONT_SIZE_KEY, String(next));
+            } catch (_) {}
+            return next;
+          });
+          return;
+        }
       }
     },
     [saveFeature],
@@ -448,7 +488,10 @@ export default function VibeEditor() {
       {toolbar}
 
       {/* Editor or Preview */}
-      <div className="flex-1 overflow-hidden min-h-0">
+      <div
+        className="flex-1 overflow-hidden min-h-0"
+        style={{ ['--editor-font-size' as string]: `${editorFontSize}px` }}
+      >
         {viewMode === 'write' ? (
           <CodeMirror
             ref={editorRef}

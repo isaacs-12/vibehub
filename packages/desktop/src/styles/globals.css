@@ -9,5 +9,5 @@
 ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
 
-.cm-editor { height: 100%; font-size: 14px; }
+.cm-editor { height: 100%; font-size: var(--editor-font-size, 14px); }
 .cm-editor.cm-focused { outline: none; }

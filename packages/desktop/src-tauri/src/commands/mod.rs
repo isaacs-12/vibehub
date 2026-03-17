@@ -899,14 +899,14 @@ pub async fn merge_branch_locally(root: String, branch: String) -> Result<String
 pub async fn read_remote_config(root: String) -> Result<serde_json::Value, String> {
     let path = PathBuf::from(&root).join(".vibe").join("remote.json");
     if !path.exists() {
-        return Ok(serde_json::json!({ "owner": "", "repo": "", "webUrl": "http://localhost:3000" }));
+        return Ok(serde_json::json!({ "owner": "", "repo": "", "webUrl": "https://getvibehub.com" }));
     }
     let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
     Ok(serde_json::json!({
         "owner": v.get("owner").and_then(|x| x.as_str()).unwrap_or(""),
         "repo": v.get("repo").and_then(|x| x.as_str()).unwrap_or(""),
-        "webUrl": v.get("webUrl").and_then(|x| x.as_str()).unwrap_or("http://localhost:3000"),
+        "webUrl": v.get("webUrl").and_then(|x| x.as_str()).unwrap_or("https://getvibehub.com"),
     }))
 }
 
@@ -917,7 +917,7 @@ pub async fn write_remote_config(root: String, owner: String, repo: String, web_
     let vibe_dir = root_path.join(".vibe");
     fs::create_dir_all(&vibe_dir).map_err(|e| e.to_string())?;
     let url = if web_url.trim().is_empty() {
-        "http://localhost:3000"
+        "https://getvibehub.com"
     } else {
         web_url.trim()
     };
@@ -990,7 +990,7 @@ pub async fn push_branch_to_backend(
     let remote: serde_json::Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
     let owner = remote.get("owner").and_then(|v| v.as_str()).ok_or("remote.json must have \"owner\"")?;
     let repo = remote.get("repo").and_then(|v| v.as_str()).ok_or("remote.json must have \"repo\"")?;
-    let web_url = remote.get("webUrl").and_then(|v| v.as_str()).unwrap_or("http://localhost:3000");
+    let web_url = remote.get("webUrl").and_then(|v| v.as_str()).unwrap_or("https://getvibehub.com");
     let base = web_url.trim_end_matches('/');
 
     let repo_result = git2::Repository::open(&root_path);
@@ -1094,7 +1094,7 @@ pub async fn pull_from_remote(root: String) -> Result<Vec<VibeFileEntry>, String
     let remote: serde_json::Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
     let owner = remote.get("owner").and_then(|v| v.as_str()).ok_or("remote.json must have \"owner\"")?;
     let repo = remote.get("repo").and_then(|v| v.as_str()).ok_or("remote.json must have \"repo\"")?;
-    let web_url = remote.get("webUrl").and_then(|v| v.as_str()).unwrap_or("http://localhost:3000");
+    let web_url = remote.get("webUrl").and_then(|v| v.as_str()).unwrap_or("https://getvibehub.com");
     let base = web_url.trim_end_matches('/');
 
     // Fetch merged feature files from the web backend
@@ -1760,4 +1760,107 @@ Output ONLY the complete updated markdown file content. No code fences, no "Here
     fs::write(&abs, &content).map_err(|e| e.to_string())?;
 
     Ok(content)
+}
+
+#[derive(serde::Serialize)]
+pub struct GeneratedIntegration {
+    pub service_name: String,
+    pub yaml: String,
+    pub empty_fields: Vec<String>,
+}
+
+#[tauri::command]
+pub async fn generate_integration(_root: String, description: String) -> Result<GeneratedIntegration, String> {
+    let api_key = std::env::var("GEMINI_API_KEY")
+        .map_err(|_| "GEMINI_API_KEY not set. Set it in .env and run with `make desktop`.")?;
+    let client = reqwest::Client::new();
+
+    let prompt = format!(
+        r#"You are a configuration generator for VibeHub integrations.
+
+The user wants to integrate with an external service. Their description:
+"{description}"
+
+Generate a YAML configuration file for this integration. Follow this format exactly:
+
+```yaml
+service: ServiceName          # PascalCase, no spaces
+description: Human-readable description of what this integration does
+auth:
+  type: oauth2|api_key|basic|none
+  # include relevant auth fields as empty strings that the user must fill in
+  # e.g. client_id: ""
+  #      client_secret: ""
+config:
+  # any non-secret configuration (endpoints, scopes, etc.)
+  # use concrete values where known, empty strings where user must fill in
+operations:
+  - name: OperationName
+    description: What this operation does
+    # up to 3-5 relevant operations for this service
+```
+
+Rules:
+- Use PascalCase for `service` and operation `name` values
+- Leave credential fields (tokens, secrets, passwords, keys) as empty strings `""`
+- Fill in known public values (API endpoints, scope names, etc.)
+- Only include operations that make sense for the described use case
+- Return ONLY the YAML, no other text or markdown fences
+
+Generate the YAML now:"#
+    );
+
+    let raw = call_gemini(&client, &api_key, &prompt).await?;
+
+    // Strip any accidental code fences
+    let yaml = raw
+        .trim()
+        .trim_start_matches("```yaml")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim()
+        .to_string();
+
+    // Extract service name from the yaml
+    let service_name = yaml
+        .lines()
+        .find(|l| l.trim_start().starts_with("service:"))
+        .and_then(|l| l.splitn(2, ':').nth(1))
+        .map(|s| s.trim().trim_matches('"').to_string())
+        .unwrap_or_else(|| "Integration".to_string());
+
+    // Find empty fields (lines with value `""` or `''` or just `: ` with nothing after)
+    let empty_fields: Vec<String> = yaml
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            let is_empty = trimmed.ends_with(": \"\"")
+                || trimmed.ends_with(": ''")
+                || trimmed.ends_with(':');
+            if is_empty {
+                let key = trimmed.trim_end_matches(':').trim_end_matches("\"\"").trim_end_matches("''").trim_end_matches(':').trim();
+                // skip the top-level keys that aren't credentials
+                let skip = ["service", "description", "auth", "config", "operations"];
+                if !skip.contains(&key) {
+                    return Some(key.to_string());
+                }
+            }
+            None
+        })
+        .collect();
+
+    Ok(GeneratedIntegration { service_name, yaml, empty_fields })
+}
+
+#[tauri::command]
+pub async fn write_integration_file(root: String, service_name: String, yaml_content: String) -> Result<(), String> {
+    let path = PathBuf::from(&root)
+        .join(".vibe")
+        .join("integrations")
+        .join(format!("{}.yaml", service_name));
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    fs::write(&path, yaml_content.as_bytes()).map_err(|e| e.to_string())?;
+    Ok(())
 }

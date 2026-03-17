@@ -103,7 +103,7 @@ export default function StatusBar() {
           );
           setRemoteModal(existing);
         } catch {
-          setRemoteModal({ owner: '', repo: '', webUrl: 'http://localhost:3000' });
+          setRemoteModal({ owner: '', repo: '', webUrl: 'https://getvibehub.com' });
         }
       } else {
         const { message } = await import('@tauri-apps/plugin-dialog');
@@ -124,7 +124,7 @@ export default function StatusBar() {
         root: projectRoot,
         owner: remoteModal.owner.trim(),
         repo: remoteModal.repo.trim(),
-        webUrl: remoteModal.webUrl.trim() || 'http://localhost:3000',
+        webUrl: remoteModal.webUrl.trim() || 'https://getvibehub.com',
       });
       setRemoteModal(null);
       const result = await doPush();
@@ -294,7 +294,7 @@ export default function StatusBar() {
               <input type="text" placeholder="Repo (e.g. test)" value={remoteModal.repo}
                 onChange={(e) => setRemoteModal((m) => m && { ...m, repo: e.target.value })}
                 className="w-full bg-surface border border-surface-border rounded px-2 py-1.5 text-xs text-gray-200 placeholder:text-muted focus:outline-none focus:border-accent" />
-              <input type="text" placeholder="Web URL (e.g. http://localhost:3000)" value={remoteModal.webUrl}
+              <input type="text" placeholder="Web URL (e.g. https://getvibehub.com)" value={remoteModal.webUrl}
                 onChange={(e) => setRemoteModal((m) => m && { ...m, webUrl: e.target.value })}
                 className="w-full bg-surface border border-surface-border rounded px-2 py-1.5 text-xs text-gray-200 placeholder:text-muted focus:outline-none focus:border-accent" />
             </div>

@@ -3,6 +3,8 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,16 +18,45 @@ var cloneDir string
 
 var cloneCmd = &cobra.Command{
 	Use:   "clone <owner/repo>",
-	Short: "Create a local directory and initialise a Vibe project (like git clone)",
-	Long:  "Creates a directory (owner-repo), runs vibe init inside it, so you can open it in Vibe Studio. Example: vibe clone ims/test → ./ims-test/.vibe/",
+	Short: "Clone a VibeHub project from the remote",
+	Long:  "Fetches the project snapshot from the VibeHub web backend and writes it to .vibe/. Example: vibe clone ims/test → ./ims-test/.vibe/",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ownerRepo := args[0]
 		parts := strings.SplitN(ownerRepo, "/", 2)
 		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-			return fmt.Errorf("use owner/repo (e.g. ims/test)")
+			return fmt.Errorf("use owner/repo format (e.g. ims/my-app)")
 		}
 		owner, repo := parts[0], parts[1]
+
+		webURL := os.Getenv("VIBEHUB_WEB_URL")
+		if webURL == "" {
+			webURL = "https://getvibehub.com"
+		}
+
+		url := fmt.Sprintf("%s/api/projects/%s/%s/snapshot", webURL, owner, repo)
+		resp, err := http.Get(url) //nolint:noctx
+		if err != nil {
+			return fmt.Errorf("could not reach %s: %w", webURL, err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusNotFound {
+			return fmt.Errorf("project %s not found on %s", ownerRepo, webURL)
+		}
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("server returned %d", resp.StatusCode)
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return err
+		}
+		var snap project.Snapshot
+		if err := json.Unmarshal(body, &snap); err != nil {
+			return fmt.Errorf("invalid snapshot from server: %w", err)
+		}
+
 		dirName := owner + "-" + repo
 		parent := cloneDir
 		if parent == "" {
@@ -35,20 +66,22 @@ var cloneCmd = &cobra.Command{
 		if err := os.MkdirAll(target, 0o755); err != nil {
 			return err
 		}
+
 		p := project.New(target)
-		if err := p.Init(repo); err != nil {
+		if err := p.ImportSnapshot(&snap); err != nil {
 			return err
 		}
-		webURL := os.Getenv("VIBEHUB_WEB_URL")
-		if webURL == "" {
-			webURL = "http://localhost:3000"
-		}
+
+		// Write remote.json so the desktop app and `vibe compile --push` know the origin
 		remote := map[string]string{"owner": owner, "repo": repo, "webUrl": webURL}
 		remotePath := filepath.Join(target, ".vibe", "remote.json")
 		raw, _ := json.MarshalIndent(remote, "", "  ")
 		_ = os.WriteFile(remotePath, raw, 0o644)
+
 		abs, _ := filepath.Abs(target)
 		color.Green("✔ Cloned %s → %s", ownerRepo, abs)
+		color.HiBlack("  %d feature(s) · %d requirement(s)",
+			len(snap.Features), len(snap.Requirements))
 		fmt.Fprintf(os.Stderr, "  Open in Vibe Studio: Open Project → %s\n", abs)
 		return nil
 	},

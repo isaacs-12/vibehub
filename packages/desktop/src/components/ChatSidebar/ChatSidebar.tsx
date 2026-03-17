@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { X, Send, Loader2, Bot, Plus, MessageSquare, Trash2, Check } from 'lucide-react';
+import { X, Send, Loader2, Bot, Plus, Trash2, Check, Plug } from 'lucide-react';
 import { useVibeStore, type ChatMessage } from '../../store/index.ts';
+import IntegrationSetup from '../IntegrationSetup/IntegrationSetup.tsx';
 
 export default function ChatSidebar() {
   const {
@@ -19,6 +20,7 @@ export default function ChatSidebar() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [integrationOpen, setIntegrationOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const activeChat =
@@ -208,6 +210,22 @@ export default function ChatSidebar() {
           </div>
         )}
 
+        {/* Integration setup panel */}
+        {integrationOpen && projectRoot && (
+          <IntegrationSetup
+            projectRoot={projectRoot}
+            onClose={() => setIntegrationOpen(false)}
+            onSaved={(serviceName) => {
+              setIntegrationOpen(false);
+              appendChatMessage({
+                id: crypto.randomUUID(),
+                role: 'assistant',
+                content: `Integration saved to .vibe/integrations/${serviceName}.yaml. Add \`Connects: [${serviceName}]\` to any feature that uses it.`,
+              });
+            }}
+          />
+        )}
+
         {/* Input */}
         <div className="p-3 border-t border-surface-border shrink-0">
           <div className="flex gap-2 items-end">
@@ -222,13 +240,23 @@ export default function ChatSidebar() {
               disabled={!projectRoot}
               className="flex-1 bg-surface border border-surface-border rounded px-3 py-2 text-sm resize-none focus:outline-none focus:border-accent placeholder:text-muted disabled:opacity-50 disabled:cursor-not-allowed min-w-0"
             />
-            <button
-              onClick={send}
-              disabled={loading || !input.trim() || !projectRoot}
-              className="p-2 bg-accent hover:bg-accent/80 disabled:opacity-40 rounded text-white transition-colors shrink-0"
-            >
-              <Send size={14} />
-            </button>
+            <div className="flex flex-col gap-1 shrink-0">
+              <button
+                onClick={() => setIntegrationOpen((v) => !v)}
+                disabled={!projectRoot}
+                title="Generate integration"
+                className={`p-2 rounded transition-colors disabled:opacity-40 ${integrationOpen ? 'bg-accent text-white' : 'bg-surface-raised text-muted hover:text-gray-200 border border-surface-border'}`}
+              >
+                <Plug size={14} />
+              </button>
+              <button
+                onClick={send}
+                disabled={loading || !input.trim() || !projectRoot}
+                className="p-2 bg-accent hover:bg-accent/80 disabled:opacity-40 rounded text-white transition-colors"
+              >
+                <Send size={14} />
+              </button>
+            </div>
           </div>
         </div>
       </div>

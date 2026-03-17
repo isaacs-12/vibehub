@@ -658,6 +658,16 @@ fn ensure_vite_dev_server(root: &std::path::Path) -> Result<(), String> {
     if dev_deps.get("vite").is_none() {
         dev_deps["vite"] = serde_json::json!("^6.0.0");
     }
+    if dev_deps.get("vitest").is_none() {
+        dev_deps["vitest"] = serde_json::json!("^2.0.0");
+    }
+    // Add test script if missing
+    if pkg.get("scripts").is_none() {
+        pkg["scripts"] = serde_json::json!({});
+    }
+    if pkg["scripts"].get("test").is_none() {
+        pkg["scripts"]["test"] = serde_json::json!("vitest");
+    }
     if dev.contains("tsx") || dev.is_empty() {
         if pkg.get("scripts").is_none() {
             pkg["scripts"] = serde_json::json!({});
@@ -730,8 +740,8 @@ fn scaffold_vite_app(root: &std::path::Path) -> Result<(), String> {
         "version": "1.0.0",
         "private": true,
         "type": "module",
-        "scripts": { "dev": "vite", "build": "vite build" },
-        "devDependencies": { "vite": "^6.0.0", "typescript": "^5.0.0" }
+        "scripts": { "dev": "vite", "build": "vite build", "test": "vitest" },
+        "devDependencies": { "vite": "^6.0.0", "typescript": "^5.0.0", "vitest": "^2.0.0", "@vitest/coverage-v8": "^2.0.0" }
     });
     fs::write(
         root.join("package.json"),
@@ -1243,11 +1253,16 @@ Naming rules:
 /// Prevents the most common class of runtime crashes in generated code.
 const DEFENSIVE_CODING_RULES: &str = "\
 Defensive coding requirements (MANDATORY — prevents runtime crashes):
-- Null-check every DOM query before use: const el = document.getElementById('x'); if (!el) return;
+- Null-check every DOM query before use. If a required container is missing, CREATE it: \
+  let el = document.getElementById('x'); if (!el) { el = document.createElement('div'); el.id = 'x'; document.body.appendChild(el); }
+- Never silently return when a required container is missing — that hides bugs. Create the element instead.
 - Wrap top-level DOM access in DOMContentLoaded if the script may run before the body is parsed
 - Use optional chaining (?.) for any property that might be null or undefined
 - Wrap async initialisation in try/catch and display errors in the UI, not just console.error
-- Never call methods on a value that could be null without a prior null guard";
+- Never call methods on a value that could be null without a prior null guard
+- EVERY file you import with a relative path MUST be included in your output. \
+  If you write `import './style.css'` you MUST also output a `style.css` file block. \
+  Never import a file you are not generating — it will crash the build.";
 
 async fn call_gemini(client: &reqwest::Client, api_key: &str, prompt: &str) -> Result<String, String> {
     let url = format!(
@@ -1478,10 +1493,320 @@ fn parse_codegen_response(text: &str) -> Result<Vec<(String, String)>, String> {
     Ok(out)
 }
 
-// Compilation is currently one codegen step per feature. To work within model context limits
-// and improve reliability, this can be split into task-specific phases (each a separate model
-// call): e.g. scaffold (package.json, tsconfig, entry), codegen (vibe → code per feature),
-// validate (typecheck/lint). Each phase can be a dedicated "agent" invoked in sequence.
+/// Phase 1 of compilation: generate (or regenerate) the app shell — index.html and the entry
+/// point — with awareness of ALL vibe features so the DOM structure is consistent before any
+/// per-feature code is written.
+///
+/// Only regenerates if any of the shell files are missing OR if they still contain the default
+/// scaffold stub (detected by the presence of "Run Vibe" in main.ts).
+/// Returns the number of files written.
+async fn generate_app_shell(
+    client: &reqwest::Client,
+    api_key: &str,
+    root_path: &std::path::Path,
+    features: &[(String, String)],
+    all_never: &[String],
+    force: bool,
+) -> usize {
+    // Skip if the project doesn't look like a web app.
+    if !root_path.join("package.json").exists() {
+        return 0;
+    }
+
+    // Detect if shell files exist and contain real (non-stub) content.
+    let main_content = fs::read_to_string(root_path.join("src/main.ts"))
+        .or_else(|_| fs::read_to_string(root_path.join("src/index.ts")))
+        .unwrap_or_default();
+    let html_content = fs::read_to_string(root_path.join("index.html")).unwrap_or_default();
+    let is_stub = main_content.contains("Run Vibe") || main_content.trim().is_empty();
+    let html_missing = html_content.trim().is_empty();
+    if !force && !is_stub && !html_missing {
+        return 0; // Shell is current — skip.
+    }
+
+    // Build a compact summary of every feature for the shell prompt.
+    let specs: String = features
+        .iter()
+        .map(|(name, content)| {
+            let preview: String = content.lines().take(30).collect::<Vec<_>>().join("\n");
+            format!("### {}\n{}\n\n", name, preview)
+        })
+        .collect();
+
+    let never_block: String = if all_never.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\nHard constraints:\n{}\n",
+            all_never.iter().map(|c| format!("- {}", c)).collect::<Vec<_>>().join("\n")
+        )
+    };
+
+    let prompt = format!(
+        r#"You are a senior software engineer setting up the HTML shell and entry point for a web app.
+The app will implement these features (full specs follow):
+
+{specs}
+{never}
+Your job is to output ONLY:
+1. `index.html` — a complete HTML page that declares the DOM containers ALL features will need
+   (nav sections, content divs, etc. each with clear id attributes). Include the error overlay script.
+2. `src/main.ts` — the entry point that initialises the app: wires up navigation, imports feature
+   modules, and sets up any shared state. Use DOMContentLoaded. Null-check every getElementById.
+
+{defensive}
+
+Error overlay to include verbatim in index.html <head>:
+<script>
+window.onerror=function(m,_,_,_,e){{var d=document.getElementById('vibe-err')||document.createElement('div');d.id='vibe-err';d.style.cssText='position:fixed;top:0;left:0;right:0;z-index:9999;background:#b00;color:#fff;padding:12px;font:13px monospace;white-space:pre-wrap;max-height:50vh;overflow:auto';d.textContent=e?e.stack||e.toString():m;if(!d.parentNode){{document.body?document.body.prepend(d):document.addEventListener('DOMContentLoaded',function(){{document.body.prepend(d);}});}}}}
+window.addEventListener('unhandledrejection',function(e){{var r=e.reason;window.onerror(r&&r.message?r.message:String(r),'',0,0,r instanceof Error?r:null);}});
+</script>
+
+Output using this format only:
+
+===FILE:index.html===
+<content>
+===ENDFILE===
+
+===FILE:src/main.ts===
+<content>
+===ENDFILE===
+"#,
+        specs = specs,
+        never = never_block,
+        defensive = DEFENSIVE_CODING_RULES,
+    );
+
+    let text = match call_gemini(client, api_key, &prompt).await {
+        Ok(t) => t,
+        Err(_) => return 0,
+    };
+    let files = match parse_codegen_response(&text) {
+        Ok(f) => f,
+        Err(_) => return 0,
+    };
+    let mut written = 0usize;
+    for (rel_path, content) in files {
+        let abs = root_path.join(&rel_path);
+        if let Some(parent) = abs.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if fs::write(&abs, &content).is_ok() {
+            written += 1;
+        }
+    }
+    written
+}
+
+// ─── Architecture manifest helpers ───────────────────────────────────────────
+
+/// FNV-1a 64-bit hash for cheap spec-change detection (no extra deps needed).
+fn spec_hash(s: &str) -> u64 {
+    let mut h: u64 = 14695981039346656037;
+    for b in s.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(1099511628211);
+    }
+    h
+}
+
+/// Extract all `id="..."` values from HTML content (deduped, order-preserved).
+fn extract_dom_ids(html: &str) -> Vec<String> {
+    let mut ids: Vec<String> = Vec::new();
+    let mut rest = html;
+    while let Some(pos) = rest.find("id=\"") {
+        rest = &rest[pos + 4..];
+        if let Some(end) = rest.find('"') {
+            let id = &rest[..end];
+            if !id.is_empty() && !ids.iter().any(|x| x == id) {
+                ids.push(id.to_string());
+            }
+            rest = &rest[end + 1..];
+        } else {
+            break;
+        }
+    }
+    ids
+}
+
+/// Scan src/ TypeScript files and collect exported names as "path:name" pairs.
+fn extract_ts_exports(root: &std::path::Path) -> Vec<String> {
+    let src = root.join("src");
+    let mut exports = Vec::new();
+    if !src.exists() { return exports; }
+    for entry in WalkDir::new(&src).max_depth(4).into_iter().filter_map(|e| e.ok()) {
+        if !entry.file_type().is_file() { continue; }
+        let ext = entry.path().extension().and_then(|e| e.to_str()).unwrap_or("");
+        if ext != "ts" && ext != "tsx" { continue; }
+        let path_str = entry.path().to_string_lossy();
+        if path_str.contains("__tests__") || path_str.contains(".test.") { continue; }
+        let Ok(content) = fs::read_to_string(entry.path()) else { continue; };
+        let rel = entry.path().strip_prefix(root)
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        for line in content.lines() {
+            let t = line.trim();
+            for kw in &["export function ", "export async function ", "export class ",
+                        "export const ", "export let "] {
+                if t.starts_with(kw) {
+                    let after = &t[kw.len()..];
+                    let end = after.find(|c: char| !c.is_alphanumeric() && c != '_')
+                        .unwrap_or(after.len());
+                    let name = &after[..end];
+                    if !name.is_empty() {
+                        exports.push(format!("{}:{}", rel, name));
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    exports
+}
+
+/// Write .vibe/arch.json with current DOM element IDs, module paths, and exported identifiers.
+/// This file is included as context in future compilations so the model never invents new IDs.
+fn write_arch_manifest(root: &std::path::Path) {
+    let html = fs::read_to_string(root.join("index.html")).unwrap_or_default();
+    let dom_ids = extract_dom_ids(&html);
+    let exports = extract_ts_exports(root);
+    let src = root.join("src");
+    let mut modules: Vec<String> = Vec::new();
+    if src.exists() {
+        for entry in WalkDir::new(&src).max_depth(4).into_iter().filter_map(|e| e.ok()) {
+            if !entry.file_type().is_file() { continue; }
+            let ext = entry.path().extension().and_then(|e| e.to_str()).unwrap_or("");
+            if ext != "ts" && ext != "tsx" { continue; }
+            let path_str = entry.path().to_string_lossy();
+            if path_str.contains("__tests__") || path_str.contains(".test.") { continue; }
+            if let Ok(rel) = entry.path().strip_prefix(root) {
+                modules.push(rel.to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    modules.sort();
+    let arch = serde_json::json!({
+        "version": 1,
+        "dom_elements": dom_ids,
+        "modules": modules,
+        "exports": exports,
+    });
+    let vibe_dir = root.join(".vibe");
+    let _ = fs::create_dir_all(&vibe_dir);
+    let _ = fs::write(vibe_dir.join("arch.json"),
+        serde_json::to_string_pretty(&arch).unwrap_or_default());
+}
+
+/// Extract acceptance criteria bullet points from a vibe spec (the ## Acceptance criteria section).
+fn extract_acceptance_criteria(content: &str) -> Vec<String> {
+    let mut in_section = false;
+    let mut criteria = Vec::new();
+    for line in content.lines() {
+        let t = line.trim();
+        if t.starts_with('#') && t.to_lowercase().contains("acceptance") {
+            in_section = true;
+            continue;
+        }
+        if in_section {
+            if t.starts_with('#') { break; }
+            let item = t.strip_prefix("- ").or_else(|| t.strip_prefix("* "));
+            if let Some(item) = item {
+                let item = item.trim();
+                if !item.is_empty() { criteria.push(item.to_string()); }
+            }
+        }
+    }
+    criteria
+}
+
+/// Generate a Vitest test file for `feature_name` from its acceptance criteria.
+/// Writes to src/__tests__/{name}.test.ts. Returns true if the file was written.
+async fn generate_feature_tests(
+    client: &reqwest::Client,
+    api_key: &str,
+    root_path: &std::path::Path,
+    feature_name: &str,
+    spec_content: &str,
+    criteria: &[String],
+) -> bool {
+    // Collect up to 3 existing source files as context for import paths.
+    let src = root_path.join("src");
+    let mut src_block = String::new();
+    let mut file_count = 0usize;
+    if src.exists() {
+        for entry in WalkDir::new(&src).max_depth(3).into_iter().filter_map(|e| e.ok()) {
+            if file_count >= 3 { break; }
+            if !entry.file_type().is_file() { continue; }
+            let ext = entry.path().extension().and_then(|e| e.to_str()).unwrap_or("");
+            if ext != "ts" && ext != "tsx" { continue; }
+            let path_str = entry.path().to_string_lossy();
+            if path_str.contains("__tests__") || path_str.contains(".test.") { continue; }
+            if let Ok(content) = fs::read_to_string(entry.path()) {
+                let rel = entry.path().strip_prefix(root_path)
+                    .map(|p| p.to_string_lossy().replace('\\', "/"))
+                    .unwrap_or_default();
+                let snippet: String = content.chars().take(2500).collect();
+                src_block.push_str(&format!("===FILE:{}===\n{}\n===ENDFILE===\n\n", rel, snippet));
+                file_count += 1;
+            }
+        }
+    }
+
+    let criteria_list = criteria.iter().map(|c| format!("- {}", c)).collect::<Vec<_>>().join("\n");
+    let prompt = format!(
+        r#"Generate a Vitest test file for the "{name}" feature.
+
+Write one `it(...)` block per acceptance criterion. Test ONLY the criteria listed.
+
+Acceptance criteria:
+{criteria}
+
+Feature spec (for context):
+```markdown
+{spec}
+```
+
+Existing source files (for import paths):
+{sources}
+Rules:
+- Use: import {{ describe, it, expect, beforeEach, afterEach }} from 'vitest'
+- Add `// @vitest-environment jsdom` as the first line if tests manipulate the DOM
+- Import exported functions/classes from their source files where possible; test units directly
+- For DOM-only features with no exports, set up document.body and call the init function
+- Do NOT mock internal modules — test real behaviour against real code
+- Keep each test focused on a single observable outcome from the criterion
+- Output exactly one file
+
+Output format:
+===FILE:src/__tests__/{name}.test.ts===
+<full file content>
+===ENDFILE==="#,
+        name = feature_name,
+        criteria = criteria_list,
+        spec = spec_content,
+        sources = src_block,
+    );
+
+    match call_gemini(client, api_key, &prompt).await {
+        Ok(text) => match parse_codegen_response(&text) {
+            Ok(files) => {
+                for (path, content) in files {
+                    let abs = root_path.join(&path);
+                    if let Some(parent) = abs.parent() { let _ = fs::create_dir_all(parent); }
+                    if fs::write(&abs, &content).is_ok() { return true; }
+                }
+                false
+            }
+            Err(_) => false,
+        },
+        Err(_) => false,
+    }
+}
+
+// Compilation runs in two phases:
+// Phase 1 (shell): one model call with all specs → generates index.html + entry so DOM structure
+//   is consistent before any feature code is written.
+// Phase 2 (features): per-feature model calls with the shell as shared context.
 #[tauri::command]
 pub async fn compile_vibes(root: String) -> Result<String, String> {
     let api_key = std::env::var("GEMINI_API_KEY").map_err(|_| "GEMINI_API_KEY not set. Set it in .env and run the app with `make desktop`.")?;
@@ -1551,6 +1876,73 @@ pub async fn compile_vibes(root: String) -> Result<String, String> {
     let mut generated = 0usize;
     let mut errors = Vec::new();
 
+    // ── Phase 1: shell pass ───────────────────────────────────────────────────
+    // Regenerate index.html + entry point whenever the combined spec hash changes.
+    // This keeps DOM containers in sync with feature requirements and prevents
+    // "element not found" runtime errors when new features are added or existing
+    // ones change their layout needs.
+    let shell_hash_path = vibe_dir.join("shell-hash");
+    let specs_combined: String = features.iter().map(|(n, c)| format!("{}:{}", n, c)).collect();
+    let new_shell_hash = spec_hash(&specs_combined);
+    let stored_shell_hash: u64 = fs::read_to_string(&shell_hash_path)
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0);
+    let shell_needs_regen = new_shell_hash != stored_shell_hash;
+
+    let shell_changed = generate_app_shell(
+        &client, &api_key, &root_path, &features, &all_never, shell_needs_regen,
+    ).await;
+    generated += shell_changed;
+    // Persist the hash so we only regenerate when specs actually change.
+    if shell_needs_regen {
+        let _ = fs::write(&shell_hash_path, new_shell_hash.to_string());
+    }
+
+    // ── Build shared HTML/entry context for phase 2 ───────────────────────────
+    // Every per-feature prompt receives the current index.html and entry so the
+    // model never invents element IDs that don't exist. Also includes arch.json
+    // when available so element IDs and module paths are preserved across runs.
+    let shared_context: String = ["index.html", "src/main.ts", "src/index.ts"]
+        .iter()
+        .filter_map(|p| {
+            let content = fs::read_to_string(root_path.join(p)).ok()?;
+            if content.trim().is_empty() { return None; }
+            Some(format!("===FILE:{}===\n{}\n===ENDFILE===\n\n", p, content))
+        })
+        .collect();
+    // Include existing arch.json so the model reuses established DOM IDs and module paths.
+    let arch_json = fs::read_to_string(vibe_dir.join("arch.json")).unwrap_or_default();
+    let arch_block = if arch_json.trim().is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n## Architecture manifest (.vibe/arch.json)\n\
+             Use these DOM element IDs and module paths — do NOT invent new ones unless \
+             genuinely required by a new feature:\n```json\n{}\n```\n",
+            arch_json
+        )
+    };
+    let shared_context_block = if shared_context.is_empty() && arch_block.is_empty() {
+        String::new()
+    } else {
+        format!("\n## Global project files (you may update these)\n{}{}", shared_context, arch_block)
+    };
+
+    // ── Load test manifest (tracks spec hash per feature to avoid redundant test regen) ──
+    let test_manifest_path = vibe_dir.join("test-manifest.json");
+    let mut test_manifest: HashMap<String, u64> = fs::read_to_string(&test_manifest_path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|v| {
+            Some(v.as_object()?.iter()
+                .filter_map(|(k, v)| Some((k.clone(), v.as_u64()?)))
+                .collect())
+        })
+        .unwrap_or_default();
+    let mut test_manifest_dirty = false;
+
+    // ── Phase 2: per-feature codegen ──────────────────────────────────────────
     for (name, content) in &features {
         let key = format!("features/{}.md", name);
         let globs = mapping.get(&key).cloned().unwrap_or_default();
@@ -1611,7 +2003,7 @@ There is no existing code yet — generate one or more files that work together 
 {grammar}
 
 {defensive}
-
+{shared}
 ## Vibe Specification
 ```markdown
 {spec}
@@ -1623,13 +2015,14 @@ Output EVERY file using this exact format — no JSON, no escaping, no markdown 
 <full file content here>
 ===ENDFILE===
 
-Use forward slashes. All files must work together."#,
+Use forward slashes. All files must work together. You may update global project files (index.html, src/main.ts) if needed to wire up this feature."#,
                 lang = lang_instruction,
                 interactive = interactive_block,
                 deps = dep_block,
                 base_dir = base_dir,
                 grammar = GRAMMAR_CONTEXT,
                 defensive = DEFENSIVE_CODING_RULES,
+                shared = shared_context_block,
                 spec = content,
                 never = never_block,
             )
@@ -1646,7 +2039,7 @@ Use forward slashes. All files must work together."#,
 {grammar}
 
 {defensive}
-
+{shared}
 ## Vibe Specification
 ```markdown
 {spec}
@@ -1660,12 +2053,13 @@ Output ONLY the files you change or add using this exact format — no JSON, no 
 <full file content here>
 ===ENDFILE===
 
-If no changes are needed, output nothing."#,
+If no changes are needed, output nothing. You may update global project files (index.html, src/main.ts) if needed."#,
                 lang = lang_instruction,
                 interactive = interactive_block,
                 deps = dep_block,
                 grammar = GRAMMAR_CONTEXT,
                 defensive = DEFENSIVE_CODING_RULES,
+                shared = shared_context_block,
                 spec = content,
                 never = never_block,
                 existing = files_block,
@@ -1690,6 +2084,22 @@ If no changes are needed, output nothing."#,
                         for path in &paths_to_cull {
                             let _ = fs::remove_file(root_path.join(path));
                         }
+                        // ── Test generation ────────────────────────────────────────
+                        // Generate/refresh a Vitest file when the spec's acceptance
+                        // criteria have changed since the last compilation.
+                        let criteria = extract_acceptance_criteria(content);
+                        if !criteria.is_empty() && root_path.join("package.json").exists() {
+                            let hash = spec_hash(content);
+                            if test_manifest.get(name.as_str()).copied() != Some(hash) {
+                                if generate_feature_tests(
+                                    &client, &api_key, &root_path, name, content, &criteria,
+                                ).await {
+                                    test_manifest.insert(name.clone(), hash);
+                                    test_manifest_dirty = true;
+                                    generated += 1;
+                                }
+                            }
+                        }
                     }
                     Err(e) => errors.push(format!("{}: parse error: {}", name, e)),
                 }
@@ -1702,6 +2112,19 @@ If no changes are needed, output nothing."#,
         return Err(errors.join("\n"));
     }
 
+    // ── Post-generation: persist manifests ────────────────────────────────────
+    // Architecture manifest: captures DOM IDs and module layout for future runs.
+    write_arch_manifest(&root_path);
+    // Test manifest: records which spec hash each feature's tests were generated from.
+    if test_manifest_dirty {
+        if let Ok(json) = serde_json::to_string_pretty(&test_manifest) {
+            let _ = fs::write(&test_manifest_path, json);
+        }
+    }
+
+    // Repair missing CSS/asset imports before tsc runs (Vite fails on these before TS even checks).
+    repair_missing_css_imports(&root_path);
+
     // Post-generation: type-check TypeScript and auto-fix any errors
     let fix_note = validate_and_fix(&client, &api_key, &root_path).await;
     Ok(format!(
@@ -1710,6 +2133,60 @@ If no changes are needed, output nothing."#,
         generated,
         fix_note
     ))
+}
+
+/// Extract the path string from a JS/TS import statement, e.g.:
+///   import "./style.css"          → "./style.css"
+///   import { foo } from "./bar"   → "./bar"
+fn extract_import_path(line: &str) -> Option<&str> {
+    let line = line.trim();
+    if !line.starts_with("import") { return None; }
+    for &q in &['"', '\''] {
+        if let Some(end) = line.rfind(q) {
+            let before = &line[..end];
+            if let Some(start) = before.rfind(q) {
+                let path = &line[start + 1..end];
+                if !path.is_empty() { return Some(path); }
+            }
+        }
+    }
+    None
+}
+
+/// Scan generated TS/JS files for relative imports of non-TS files (CSS, SCSS, etc.) that
+/// don't exist on disk. Creates empty stub files so Vite doesn't abort the dev server.
+/// TypeScript import errors are already handled by validate_and_fix via tsc.
+fn repair_missing_css_imports(root: &std::path::Path) -> usize {
+    let src = root.join("src");
+    if !src.exists() { return 0; }
+    let mut created = 0usize;
+    let entries: Vec<_> = WalkDir::new(&src).max_depth(5).into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            if !e.file_type().is_file() { return false; }
+            let ext = e.path().extension().and_then(|x| x.to_str()).unwrap_or("");
+            matches!(ext, "ts" | "tsx" | "js")
+        })
+        .collect();
+    for entry in entries {
+        let Ok(content) = fs::read_to_string(entry.path()) else { continue };
+        for line in content.lines() {
+            let Some(path) = extract_import_path(line) else { continue };
+            if !path.starts_with('.') { continue } // skip package imports
+            let ext = std::path::Path::new(path)
+                .extension().and_then(|e| e.to_str()).unwrap_or("");
+            if !matches!(ext, "css" | "scss" | "sass" | "less" | "styl") { continue }
+            let dir = entry.path().parent().unwrap_or(&src);
+            let target = dir.join(path);
+            if !target.exists() {
+                if let Some(parent) = target.parent() { let _ = fs::create_dir_all(parent); }
+                if fs::write(&target, "/* auto-generated stub */\n").is_ok() {
+                    created += 1;
+                }
+            }
+        }
+    }
+    created
 }
 
 /// Run `tsc --noEmit` on the project (if a tsconfig exists) and ask the model to fix any errors.

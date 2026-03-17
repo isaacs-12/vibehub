@@ -21,3 +21,7 @@ tokio = { version = "1", features = ["full"] }
 walkdir = "2"
 git2 = "0.19"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+[profile.dev]
+debug = 1          # line tables only (not full DWARF) — ~50% smaller debug builds
+incremental = true # recompile only changed crates

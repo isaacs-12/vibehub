@@ -703,6 +703,20 @@ root.innerHTML = '<h1>Vibe App</h1><p>Open <strong>http://localhost:5173</strong
         fs::write(root.join("vite.config.ts"), "import { defineConfig } from 'vite';\nexport default defineConfig({ root: '.' });\n")
             .map_err(|e| e.to_string())?;
     }
+    if !root.join("tsconfig.json").exists() {
+        let tsconfig = serde_json::json!({
+            "compilerOptions": {
+                "target": "ES2020", "module": "ESNext", "moduleResolution": "bundler",
+                "strict": true, "noImplicitAny": true, "strictNullChecks": true,
+                "esModuleInterop": true, "skipLibCheck": true, "lib": ["ES2020", "DOM"]
+            },
+            "include": ["src/**/*", "vite.config.ts"]
+        });
+        let _ = fs::write(
+            root.join("tsconfig.json"),
+            serde_json::to_string_pretty(&tsconfig).unwrap_or_default(),
+        );
+    }
     Ok(())
 }
 
@@ -717,7 +731,7 @@ fn scaffold_vite_app(root: &std::path::Path) -> Result<(), String> {
         "private": true,
         "type": "module",
         "scripts": { "dev": "vite", "build": "vite build" },
-        "devDependencies": { "vite": "^6.0.0" }
+        "devDependencies": { "vite": "^6.0.0", "typescript": "^5.0.0" }
     });
     fs::write(
         root.join("package.json"),
@@ -725,12 +739,45 @@ fn scaffold_vite_app(root: &std::path::Path) -> Result<(), String> {
     )
     .map_err(|e| e.to_string())?;
 
+    let tsconfig = serde_json::json!({
+        "compilerOptions": {
+            "target": "ES2020",
+            "module": "ESNext",
+            "moduleResolution": "bundler",
+            "strict": true,
+            "noImplicitAny": true,
+            "strictNullChecks": true,
+            "esModuleInterop": true,
+            "skipLibCheck": true,
+            "lib": ["ES2020", "DOM"]
+        },
+        "include": ["src/**/*", "vite.config.ts"]
+    });
+    fs::write(
+        root.join("tsconfig.json"),
+        serde_json::to_string_pretty(&tsconfig).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+
+    // Error overlay: shows runtime errors in the UI so non-technical users see them
     let index_html = r#"<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Vibe App</title>
+  <script>
+    window.onerror = function(msg, _src, _line, _col, err) {
+      var d = document.getElementById('vibe-err') || document.createElement('div');
+      d.id = 'vibe-err';
+      d.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#b00;color:#fff;padding:12px 16px;font:13px/1.5 monospace;white-space:pre-wrap;max-height:50vh;overflow:auto';
+      d.textContent = err ? (err.stack || err.toString()) : msg;
+      if (!d.parentNode) { document.body ? document.body.prepend(d) : document.addEventListener('DOMContentLoaded', function(){ document.body.prepend(d); }); }
+    };
+    window.addEventListener('unhandledrejection', function(e) {
+      var r = e.reason; window.onerror(r && r.message ? r.message : String(r), '', 0, 0, r instanceof Error ? r : null);
+    });
+  </script>
 </head>
 <body>
   <div id="root"></div>
@@ -741,8 +788,10 @@ fn scaffold_vite_app(root: &std::path::Path) -> Result<(), String> {
     fs::write(root.join("index.html"), index_html).map_err(|e| e.to_string())?;
 
     let main_ts = r#"// Entry point for your Vibe app. Edit src/ or run Vibe compile to generate.
-const root = document.getElementById('root')!;
-root.innerHTML = '<h1>Vibe App</h1><p>Run <strong>Vibe</strong> in Vibe Studio to generate your app, or edit <code>src/</code>.</p>';
+const rootEl = document.getElementById('root');
+if (rootEl) {
+  rootEl.innerHTML = '<h1>Vibe App</h1><p>Run <strong>Vibe</strong> in Vibe Studio to generate your app, or edit <code>src/</code>.</p>';
+}
 "#;
     fs::write(src.join("main.ts"), main_ts).map_err(|e| e.to_string())?;
 
@@ -1151,6 +1200,55 @@ pub async fn pull_from_remote(root: String) -> Result<Vec<VibeFileEntry>, String
 const CODEGEN_MODEL: &str = "gemini-2.5-flash-lite";
 const MAX_FILE_CHARS: usize = 8_000;
 
+/// Shared grammar reference injected into every AI prompt.
+/// Defines the vibe frontmatter format, naming conventions, and the starter template
+/// so all models have the same understanding of the spec format regardless of context.
+const GRAMMAR_CONTEXT: &str = "\
+## Vibe Grammar Reference
+
+Every vibe file starts with a YAML frontmatter block between `---` delimiters:
+
+```
+---
+Uses: [FeatureName, OtherFeature]   # PascalCase — other features this one depends on
+Data: [EntityName, OtherEntity]     # PascalCase — data entities this feature reads or writes
+Never:                              # Hard constraints the compiler must never violate
+  - do not store passwords in plain text
+  - never expose internal user IDs to the client
+Connects: [GoogleSheets, Stripe]    # PascalCase — external service integrations this feature uses
+---
+
+# Feature Title
+
+## What it does
+Plain-language description.
+
+## Behavior
+- Specific rules, edge cases, conditions
+- Each bullet is something the compiler should implement
+
+## Acceptance criteria
+- How do you know this feature is working correctly?
+```
+
+Naming rules:
+- All values in `Uses` and `Data` must be PascalCase (e.g. UserAuthentication, PaymentMethod, GoogleSheets)
+- Feature file names are kebab-case (user-auth.md) but referenced in grammar as PascalCase (UserAuth)
+- `Uses` declares compile-time dependencies — the compiler will inject the content of those features as context
+- `Data` declares data shape ownership — used to detect cross-feature data coupling
+- `Never` entries are hard constraints forwarded verbatim to the compiler as prohibited behaviours
+- `Connects` declares external service integrations — each name must match a .vibe/integrations/{Name}.yaml file";
+
+/// Defensive coding rules injected into every codegen prompt.
+/// Prevents the most common class of runtime crashes in generated code.
+const DEFENSIVE_CODING_RULES: &str = "\
+Defensive coding requirements (MANDATORY — prevents runtime crashes):
+- Null-check every DOM query before use: const el = document.getElementById('x'); if (!el) return;
+- Wrap top-level DOM access in DOMContentLoaded if the script may run before the body is parsed
+- Use optional chaining (?.) for any property that might be null or undefined
+- Wrap async initialisation in try/catch and display errors in the UI, not just console.error
+- Never call methods on a value that could be null without a prior null guard";
+
 async fn call_gemini(client: &reqwest::Client, api_key: &str, prompt: &str) -> Result<String, String> {
     let url = format!(
         "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
@@ -1312,14 +1410,60 @@ fn preferred_language_from_vibe(content: &str) -> (&'static str, &'static str) {
     ("ts", "Use TypeScript or the language that fits the spec.")
 }
 
+/// Parse the delimiter-based codegen response format:
+///   ===FILE:src/main.ts===
+///   <content>
+///   ===ENDFILE===
+///
+/// Falls back to the legacy JSON array format so old responses still work.
 fn parse_codegen_response(text: &str) -> Result<Vec<(String, String)>, String> {
+    // ── Primary: delimiter format ──────────────────────────────────────────
+    const FILE_START: &str = "===FILE:";
+    const FILE_END: &str = "===ENDFILE===";
+
+    if text.contains(FILE_START) {
+        let mut files = Vec::new();
+        let mut remaining = text;
+        while let Some(start) = remaining.find(FILE_START) {
+            remaining = &remaining[start + FILE_START.len()..];
+            // everything up to the next === is the path
+            let eq_pos = remaining.find("===").ok_or("Malformed FILE block: missing closing ===")?;
+            let path = remaining[..eq_pos].trim().to_string();
+            remaining = &remaining[eq_pos + 3..]; // skip ===
+            // content runs until ===ENDFILE=== (or end of string)
+            let content = if let Some(end) = remaining.find(FILE_END) {
+                let c = remaining[..end].trim_start_matches('\n').to_string();
+                remaining = &remaining[end + FILE_END.len()..];
+                c
+            } else {
+                let c = remaining.trim_start_matches('\n').to_string();
+                remaining = "";
+                c
+            };
+            if !path.is_empty() && !content.is_empty() {
+                files.push((path, content));
+            }
+        }
+        if !files.is_empty() {
+            return Ok(files);
+        }
+        // If we found FILE_START markers but extracted nothing, fall through to JSON
+    }
+
+    // ── Fallback: JSON array [{filePath, content}] ─────────────────────────
     let text = text
         .trim()
         .trim_start_matches("```json")
         .trim_start_matches("```")
         .trim_end_matches("```")
         .trim();
-    let arr: Vec<serde_json::Value> = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    if text == "[]" || text.is_empty() {
+        return Ok(vec![]);
+    }
+    let arr: Vec<serde_json::Value> = serde_json::from_str(text).map_err(|e| {
+        // Surface a more helpful error: include the first 200 chars so the caller can log it
+        format!("JSON parse failed ({}); first 200 chars: {:?}", e, &text[..text.len().min(200)])
+    })?;
     let mut out = Vec::new();
     for v in arr {
         if let (Some(path), Some(content)) = (
@@ -1461,52 +1605,70 @@ pub async fn compile_vibes(root: String) -> Result<String, String> {
             format!(
                 r#"You are a senior software engineer. Create NEW code that implements this specification.
 There is no existing code yet — generate one or more files that work together (imports, entry points, etc.).
-{}.
-{}{}Do NOT derive file names from the vibe document name (e.g. "overview.md"). Name files by the feature's purpose and use conventional, best-practice naming for the language and project (e.g. calculator.py, components/Calculator.tsx, or domain-based structure). Place all files under {}/.
+{lang}.
+{interactive}{deps}Do NOT derive file names from the vibe document name (e.g. "overview.md"). Name files by the feature's purpose and use conventional, best-practice naming for the language and project (e.g. calculator.py, components/Calculator.tsx). Place all files under {base_dir}/.
+
+{grammar}
+
+{defensive}
 
 ## Vibe Specification
 ```markdown
-{}
+{spec}
 ```
-{}
-Respond with ONLY a valid JSON array of one or more objects:
-[{{"filePath":"<path under {}>","content":"<full file content>"}}, ...]
-Use forward slashes in paths. All files must work together. No markdown fences."#,
-                lang_instruction,
-                interactive_block,
-                dep_block,
-                base_dir,
-                content,
-                never_block,
-                base_dir
+{never}
+Output EVERY file using this exact format — no JSON, no escaping, no markdown fences:
+
+===FILE:path/to/file.ext===
+<full file content here>
+===ENDFILE===
+
+Use forward slashes. All files must work together."#,
+                lang = lang_instruction,
+                interactive = interactive_block,
+                deps = dep_block,
+                base_dir = base_dir,
+                grammar = GRAMMAR_CONTEXT,
+                defensive = DEFENSIVE_CODING_RULES,
+                spec = content,
+                never = never_block,
             )
         } else {
             let files_block: String = existing
                 .iter()
-                .map(|(path, c)| format!("### {}\n```\n{}\n```\n\n", path, c))
+                .map(|(path, c)| format!("===FILE:{}===\n{}\n===ENDFILE===\n\n", path, c))
                 .collect();
             format!(
                 r#"You are a senior software engineer. Update the existing code to implement this specification.
-{}.
-{}{}You may modify one or more of the existing files and/or add new files under the same directory structure. All output files must work together (correct imports, exports, entry points). Use conventional file names for any new files (feature/domain-based, not the vibe document name).
+{lang}.
+{interactive}{deps}You may modify existing files and/or add new ones. All output files must work together (correct imports, exports, entry points).
+
+{grammar}
+
+{defensive}
 
 ## Vibe Specification
 ```markdown
-{}
+{spec}
 ```
-{}
+{never}
 ## Existing Code
-{}
+{existing}
+Output ONLY the files you change or add using this exact format — no JSON, no escaping, no markdown fences:
 
-Respond with ONLY a valid JSON array of objects for every file you change or add:
-[{{"filePath":"<exact path>","content":"<full file content>"}}, ...]
-Return [] if no changes needed. No markdown fences."#,
-                lang_instruction,
-                interactive_block,
-                dep_block,
-                content,
-                never_block,
-                files_block
+===FILE:path/to/file.ext===
+<full file content here>
+===ENDFILE===
+
+If no changes are needed, output nothing."#,
+                lang = lang_instruction,
+                interactive = interactive_block,
+                deps = dep_block,
+                grammar = GRAMMAR_CONTEXT,
+                defensive = DEFENSIVE_CODING_RULES,
+                spec = content,
+                never = never_block,
+                existing = files_block,
             )
         };
 
@@ -1539,11 +1701,119 @@ Return [] if no changes needed. No markdown fences."#,
     if !errors.is_empty() {
         return Err(errors.join("\n"));
     }
+
+    // Post-generation: type-check TypeScript and auto-fix any errors
+    let fix_note = validate_and_fix(&client, &api_key, &root_path).await;
     Ok(format!(
-        "Compilation finished. {} feature(s) processed, {} file(s) written.",
+        "Compilation finished. {} feature(s) processed, {} file(s) written.{}",
         features.len(),
-        generated
+        generated,
+        fix_note
     ))
+}
+
+/// Run `tsc --noEmit` on the project (if a tsconfig exists) and ask the model to fix any errors.
+/// Returns an empty string on success or a short status message appended to the compile summary.
+async fn validate_and_fix(
+    client: &reqwest::Client,
+    api_key: &str,
+    root_path: &std::path::Path,
+) -> String {
+    if !root_path.join("tsconfig.json").exists() {
+        return String::new();
+    }
+    let out = match std::process::Command::new("npx")
+        .args(["tsc", "--noEmit", "--pretty", "false"])
+        .current_dir(root_path)
+        .output()
+    {
+        Ok(o) => o,
+        Err(_) => return String::new(), // tsc unavailable; skip silently
+    };
+    if out.status.success() {
+        return String::new();
+    }
+    let errors = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let errors = errors.trim();
+    if errors.is_empty() {
+        return String::new();
+    }
+
+    // Collect errored TS file paths from lines like: src/main.ts(111,17): error TS...
+    let mut file_paths: Vec<String> = errors
+        .lines()
+        .filter_map(|line| {
+            let path_part = line.trim().split('(').next()?.trim();
+            if path_part.ends_with(".ts") || path_part.ends_with(".tsx") {
+                Some(path_part.to_string())
+            } else {
+                None
+            }
+        })
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    file_paths.sort();
+
+    let files_block: String = file_paths
+        .iter()
+        .filter_map(|rel| {
+            let content = fs::read_to_string(root_path.join(rel)).ok()?;
+            Some(format!("===FILE:{}===\n{}\n===ENDFILE===\n\n", rel, content))
+        })
+        .collect();
+
+    if files_block.is_empty() {
+        return format!(" ({} TypeScript error(s) found; open console for details)", errors.lines().count());
+    }
+
+    let fix_prompt = format!(
+        r#"Fix the TypeScript compilation errors below. Preserve all existing logic — only change what is needed to fix the errors.
+
+{defensive}
+
+TypeScript errors:
+```
+{errors}
+```
+
+Files to fix:
+{files}
+Output ONLY the fixed files using this format — no JSON, no escaping:
+
+===FILE:path/to/file.ts===
+<full corrected file content>
+===ENDFILE===
+"#,
+        defensive = DEFENSIVE_CODING_RULES,
+        errors = errors,
+        files = files_block
+    );
+
+    match call_gemini(client, api_key, &fix_prompt).await {
+        Ok(text) => match parse_codegen_response(&text) {
+            Ok(fixes) if !fixes.is_empty() => {
+                let mut fixed = 0usize;
+                for (rel_path, content) in fixes {
+                    let abs = root_path.join(&rel_path);
+                    if abs.exists() && fs::write(&abs, &content).is_ok() {
+                        fixed += 1;
+                    }
+                }
+                if fixed > 0 {
+                    format!(" Auto-fixed {} TypeScript error(s).", fixed)
+                } else {
+                    String::new()
+                }
+            }
+            _ => String::new(),
+        },
+        Err(_) => String::new(),
+    }
 }
 
 #[tauri::command]
@@ -1592,16 +1862,29 @@ pub async fn chat_with_vibes(
     let system_context = format!(
         "You are an expert software architect and product manager working inside Vibe Studio. \
          You help users edit their 'Vibe' files — human-readable feature specifications that drive code generation.\n\n\
-         Vibe files use structured grammar frontmatter with three fields:\n\
-         - Uses: [FeatureName, ...] — other features this one depends on (PascalCase names)\n\
-         - Data: [EntityName, ...] — data entities this feature touches (PascalCase names)\n\
-         - Never: constraints the compiler must never violate\n\n\
+         {grammar_ref}\n\n\
          Current project root: {root}\n\
          Current feature: {feature_name}{grammar_summary}\n\n\
          Current Vibe file content:\n```markdown\n{vibe_context}\n```\n\n\
-         When suggesting changes, preserve and update the grammar frontmatter. \
-         When the user asks to update multiple features, respond with the full updated Markdown for each, \
-         clearly labeled with the feature name."
+         When suggesting changes, preserve and update the grammar frontmatter.\n\n\
+         CRITICAL RULE — new feature files: If your response involves creating a NEW feature file \
+         (one that does not yet exist), you MUST NOT suggest applying it to the current file. \
+         Instead, show the full content for the new file in a fenced code block labeled with the \
+         feature slug (e.g. **user-auth** followed by the markdown block), and emit a \
+         create_feature action for it. Only emit an 'apply' action for changes to the CURRENT \
+         feature file ({feature_name}).\n\n\
+         IMPORTANT: After every response, append a line containing exactly '---actions---' followed by a \
+         JSON array of 2-4 suggested next actions. Use this format:\n\
+         ---actions---\n\
+         [{{\"type\":\"reply\",\"label\":\"...\",\"text\":\"...\"}},{{\"type\":\"apply\",\"label\":\"Update {feature_name}\"}}]\n\n\
+         Action types:\n\
+         - {{\"type\":\"reply\",\"label\":\"...\",\"text\":\"...\"}} - a follow-up message the user can send with one click\n\
+         - {{\"type\":\"apply\",\"label\":\"Update {feature_name}\"}} - apply suggested edits to the CURRENT file only\n\
+         - {{\"type\":\"create_feature\",\"label\":\"Create <name>\",\"name\":\"<kebab-case-slug>\"}} - create a brand new feature file; use when you suggest a new .md file\n\
+         - {{\"type\":\"integration\",\"label\":\"Set up integration\"}} - open the integration setup panel\n\
+         Only emit 'apply' for the current file. Emit 'create_feature' for every new file suggested. \
+         Always include at least one reply action. Keep labels short (3-5 words).",
+        grammar_ref = GRAMMAR_CONTEXT
     );
 
     // Prepend system context as a user turn (Gemini doesn't have a system role)
@@ -1683,31 +1966,33 @@ pub async fn apply_chat_to_vibe_file(
     );
 
     let prompt = format!(
-        r#"You are applying suggested edits to a Vibe (feature specification) markdown file. The user asked for changes in chat and the assistant replied with a suggestion. Your task is to output the COMPLETE updated file content that applies that suggestion.
+        r#"You are applying suggested edits to a specific Vibe (feature specification) markdown file. The user asked for changes in chat and the assistant replied with a suggestion. Your task is to output the COMPLETE updated content for the target file only.
 
-Vibe files use structured grammar frontmatter with three PascalCase fields:
-- Uses: [FeatureName, ...] — dependencies on other features
-- Data: [EntityName, ...] — data entities this feature touches
-- Never: constraints the compiler must never violate
+Target file: **{feature_name}**
 
-Rules:
-1. If the current file has grammar frontmatter (---...---), preserve it and update it to reflect any new dependencies, entities, or constraints implied by the changes.
-2. If the current file has no grammar frontmatter, add it at the top with appropriate values inferred from the content.
-3. All names in Uses and Data must be PascalCase (e.g. UserAuthentication, PaymentMethod).
+{grammar_ref}
+
+Rules for applying edits:
+1. Only apply changes relevant to **{feature_name}**. The assistant's message may contain content for other feature files — ignore those entirely.
+2. If the current file has grammar frontmatter (---...---), preserve it and update it to reflect any new dependencies, entities, or constraints implied by the changes.
+3. If the current file has no grammar frontmatter, add it at the top with appropriate values inferred from the content.
+4. All names in Uses and Data must be PascalCase (e.g. UserAuthentication, PaymentMethod).
 
 Current file content:
 ```markdown
-{}
+{current_content}
 ```
 
-Assistant's suggestion (what the user should change):
+Assistant's suggestion (apply only the parts relevant to {feature_name}):
 ```
-{}
+{last_assistant_message}
 ```
 
-Output ONLY the complete updated markdown file content. No code fences, no "Here is the updated content", no explanation. Just the raw markdown that should be written to the file."#,
-        current_content,
-        last_assistant_message
+Output ONLY the complete updated markdown for **{feature_name}**. No code fences, no explanation. Just the raw markdown."#,
+        feature_name = feature_name,
+        grammar_ref = GRAMMAR_CONTEXT,
+        current_content = current_content,
+        last_assistant_message = last_assistant_message
     );
 
     let body = serde_json::json!({

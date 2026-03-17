@@ -7,11 +7,18 @@ export interface FeatureNode {
   children?: FeatureNode[]; // for nested groupings
 }
 
+export type ChatAction =
+  | { type: 'reply'; label: string; text: string }
+  | { type: 'apply'; label: string }
+  | { type: 'create_feature'; label: string; name: string }
+  | { type: 'integration'; label: string };
+
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   vibeContext?: string;   // which vibe file was active
+  actions?: ChatAction[];
 }
 
 export interface ChatSession {

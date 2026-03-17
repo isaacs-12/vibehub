@@ -6,6 +6,7 @@ const FeatureTemplate = `---
 Uses: []
 Data: []
 Never: []
+Connects: []
 ---
 
 # %s

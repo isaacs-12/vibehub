@@ -3,7 +3,7 @@
  * The placeholder TOKEN is replaced with the feature slug at creation time.
  */
 export const FEATURE_TEMPLATE = (slug: string) =>
-  `---\nUses: []\nData: []\nNever: []\n---\n\n# ${slug}\n\n## What it does\nDescribe the feature in plain language. What can a user do, and what happens when they do it?\n\n## Behavior\n- Add specific rules, edge cases, or conditions here\n- Each bullet is something the compiler should implement\n\n## Acceptance criteria\n- How do you know this feature is working correctly?\n`;
+  `---\nUses: []\nData: []\nNever: []\nConnects: []\n---\n\n# ${slug}\n\n## What it does\nDescribe the feature in plain language. What can a user do, and what happens when they do it?\n\n## Behavior\n- Add specific rules, edge cases, or conditions here\n- Each bullet is something the compiler should implement\n\n## Acceptance criteria\n- How do you know this feature is working correctly?\n`;
 
 /**
  * Vibe grammar: structured frontmatter for feature specs.
@@ -30,12 +30,13 @@ export interface VibeGrammar {
   Uses: string[];
   Data: string[];
   Never: string[];
+  Connects: string[];
 }
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 
 export function parseVibeGrammar(content: string): { grammar: VibeGrammar; body: string } {
-  const grammar: VibeGrammar = { Uses: [], Data: [], Never: [] };
+  const grammar: VibeGrammar = { Uses: [], Data: [], Never: [], Connects: [] };
   const match = content.match(FRONTMATTER_RE);
   if (!match) return { grammar, body: content };
 
@@ -72,6 +73,12 @@ export function parseVibeGrammar(content: string): { grammar: VibeGrammar; body:
     }
   }
 
+  // Connects: [A, B, C]
+  const connectsMatch = fm.match(/^Connects:\s*\[([^\]]*)\]/m);
+  if (connectsMatch) {
+    grammar.Connects = connectsMatch[1].split(',').map((s) => s.trim()).filter(Boolean);
+  }
+
   return { grammar, body };
 }
 
@@ -85,6 +92,7 @@ export function serializeVibeGrammar(grammar: VibeGrammar, body: string): string
   } else {
     lines.push('Never: []');
   }
+  lines.push(`Connects: [${grammar.Connects.join(', ')}]`);
   lines.push('---');
   lines.push('');
   return lines.join('\n') + body;

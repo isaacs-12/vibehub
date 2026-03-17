@@ -19,6 +19,7 @@ import {
   Link,
   Database,
   ShieldOff,
+  Plug,
 } from 'lucide-react';
 import { useVibeStore } from '../../store/index.ts';
 import {
@@ -44,7 +45,7 @@ function GrammarPanel({
   onChange: (newContent: string) => void;
 }) {
   const { features, selectedFeature, selectFeature } = useVibeStore();
-  const [addingTo, setAddingTo] = useState<'Uses' | 'Data' | 'Never' | null>(null);
+  const [addingTo, setAddingTo] = useState<'Uses' | 'Data' | 'Never' | 'Connects' | null>(null);
   const [addInput, setAddInput] = useState('');
   const addInputRef = useRef<HTMLInputElement>(null);
 
@@ -76,11 +77,11 @@ function GrammarPanel({
     onChange(serializeVibeGrammar(updated, body));
   }
 
-  function removeFrom(field: 'Uses' | 'Data' | 'Never', value: string) {
+  function removeFrom(field: 'Uses' | 'Data' | 'Never' | 'Connects', value: string) {
     commit({ ...grammar, [field]: grammar[field].filter((v) => v !== value) });
   }
 
-  function startAdding(field: 'Uses' | 'Data' | 'Never') {
+  function startAdding(field: 'Uses' | 'Data' | 'Never' | 'Connects') {
     setAddingTo(field);
     setAddInput('');
     setTimeout(() => addInputRef.current?.focus(), 0);
@@ -102,6 +103,13 @@ function GrammarPanel({
     setAddingTo(null);
     setAddInput('');
   }
+
+  // Integration names that already exist on disk (loaded from features' Connects fields across all features)
+  const knownIntegrations = Array.from(
+    new Set(
+      allFeatures.flatMap((f) => parseVibeGrammar(f.content).grammar.Connects),
+    ),
+  ).filter((s) => s.length > 0);
 
   function navigateToFeature(grammarName: string) {
     const target = allFeatures.find(
@@ -300,6 +308,71 @@ function GrammarPanel({
           </button>
         )}
       </div>
+
+      {/* Connects */}
+      <div className="flex items-center gap-1 flex-wrap">
+        <span className="flex items-center gap-1 text-muted shrink-0">
+          <Plug size={10} />
+          Connects
+        </span>
+        {grammar.Connects.map((name) => (
+          <span
+            key={name}
+            className="group flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-teal-500/20 text-teal-300 hover:bg-teal-500/30 transition-colors"
+            title={name}
+          >
+            {name}
+            <button
+              onClick={() => removeFrom('Connects', name)}
+              className="opacity-0 group-hover:opacity-100 ml-0.5 hover:text-white"
+            >
+              <X size={9} />
+            </button>
+          </span>
+        ))}
+        {addingTo === 'Connects' ? (
+          <div className="relative">
+            <input
+              ref={addingTo === 'Connects' ? addInputRef : undefined}
+              value={addInput}
+              onChange={(e) => setAddInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') confirmAdd();
+                if (e.key === 'Escape') { setAddingTo(null); setAddInput(''); }
+              }}
+              onBlur={() => setTimeout(() => { setAddingTo(null); setAddInput(''); }, 150)}
+              placeholder="ServiceName"
+              className="w-28 bg-surface border border-accent/50 rounded px-1.5 py-0.5 text-xs text-gray-200 placeholder:text-muted focus:outline-none focus:border-accent"
+            />
+            {knownIntegrations.filter(
+              (s) => !grammar.Connects.includes(s) && s.toLowerCase().includes(addInput.toLowerCase()),
+            ).length > 0 && (
+              <div className="absolute top-full left-0 mt-0.5 bg-surface-overlay border border-surface-border rounded shadow-lg z-20 min-w-max">
+                {knownIntegrations
+                  .filter((s) => !grammar.Connects.includes(s) && s.toLowerCase().includes(addInput.toLowerCase()))
+                  .slice(0, 6)
+                  .map((s) => (
+                    <button
+                      key={s}
+                      onMouseDown={() => { commit({ ...grammar, Connects: [...grammar.Connects, s] }); setAddingTo(null); setAddInput(''); }}
+                      className="block w-full text-left px-2 py-1 text-xs text-gray-200 hover:bg-accent/20"
+                    >
+                      {s}
+                    </button>
+                  ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <button
+            onClick={() => startAdding('Connects')}
+            className="text-muted hover:text-gray-300 transition-colors"
+            title="Add integration"
+          >
+            <Plus size={11} />
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -327,8 +400,12 @@ export default function VibeEditor() {
   });
 
   const handleChange = useCallback(
-    (value: string) => updateEditorContent(value),
-    [updateEditorContent],
+    (value: string) => {
+      // Editor shows only the body — reattach the grammar frontmatter on every change.
+      const { grammar } = parseVibeGrammar(editorContent);
+      updateEditorContent(serializeVibeGrammar(grammar, value));
+    },
+    [editorContent, updateEditorContent],
   );
 
   const handleKeyDown = useCallback(
@@ -495,7 +572,7 @@ export default function VibeEditor() {
         {viewMode === 'write' ? (
           <CodeMirror
             ref={editorRef}
-            value={editorContent}
+            value={parseVibeGrammar(editorContent).body}
             height="100%"
             extensions={[markdown({ base: markdownLanguage })]}
             theme={oneDark}

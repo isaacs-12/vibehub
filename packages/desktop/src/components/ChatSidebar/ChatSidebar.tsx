@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { X, Send, Loader2, Bot, Plus, Trash2, Check, Plug } from 'lucide-react';
-import { useVibeStore, type ChatMessage } from '../../store/index.ts';
+import { useVibeStore, type ChatMessage, type ChatAction } from '../../store/index.ts';
 import IntegrationSetup from '../IntegrationSetup/IntegrationSetup.tsx';
 
 export default function ChatSidebar() {
@@ -16,6 +16,7 @@ export default function ChatSidebar() {
     editorContent,
     projectRoot,
     setCurrentFeatureContent,
+    setFeatures,
   } = useVibeStore();
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -66,14 +67,15 @@ export default function ChatSidebar() {
 
     try {
       const { invoke } = await import('@tauri-apps/api/core');
-      const response = await invoke<string>('chat_with_vibes', {
+      const raw = await invoke<string>('chat_with_vibes', {
         root: projectRoot,
         userMessage: input,
         vibeContext: editorContent,
         featureName: selectedFeature?.name ?? '',
         history: chatMessages.slice(-10).map((m) => ({ role: m.role, content: m.content })),
       });
-      appendChatMessage({ id: crypto.randomUUID(), role: 'assistant', content: response });
+      const { content, actions } = parseActions(raw);
+      appendChatMessage({ id: crypto.randomUUID(), role: 'assistant', content, actions });
     } catch (err) {
       appendChatMessage({
         id: crypto.randomUUID(),
@@ -105,6 +107,64 @@ export default function ChatSidebar() {
       });
     } finally {
       setApplying(false);
+    }
+  }
+
+  async function createFeature(name: string, assistantContent: string) {
+    if (!projectRoot) return;
+    // Extract the fenced code block for this feature from the assistant message.
+    // Looks for **name** or **name.vibe** or **name.md** followed by ```markdown ... ```
+    const escaped = name.replace(/[-]/g, '[-]');
+    const blockRe = new RegExp(
+      `\\*\\*${escaped}(?:\\.vibe|\\.md)?\\*\\*[^\\n]*\\n\`\`\`(?:markdown)?\\n([\\s\\S]*?)\`\`\``,
+      'i',
+    );
+    const match = assistantContent.match(blockRe);
+    const content = match?.[1]?.trim() ?? '';
+    if (!content) {
+      appendChatMessage({
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: `Couldn't extract content for "${name}" from the response. Ask me to show the full file again.`,
+      });
+      return;
+    }
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('write_vibe_file', {
+        root: projectRoot,
+        relativePath: `.vibe/features/${name}.md`,
+        content,
+      });
+      // Refresh sidebar so the new file appears immediately
+      const raw = await invoke<Array<{ name: string; path: string; content: string }>>(
+        'list_vibe_features', { root: projectRoot },
+      );
+      setFeatures(raw.map((f) => ({ name: f.name, path: f.path, content: f.content })));
+      appendChatMessage({
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: `Created .vibe/features/${name}.md`,
+      });
+    } catch (err) {
+      appendChatMessage({
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: `Failed to create ${name}: ${String(err)}`,
+      });
+    }
+  }
+
+  function handleAction(action: ChatAction) {
+    if (action.type === 'reply') {
+      setInput(action.text);
+    } else if (action.type === 'apply') {
+      applyToFile();
+    } else if (action.type === 'create_feature') {
+      const content = lastAssistantMessage?.content ?? '';
+      createFeature(action.name, content);
+    } else if (action.type === 'integration') {
+      setIntegrationOpen(true);
     }
   }
 
@@ -179,7 +239,7 @@ export default function ChatSidebar() {
             </div>
           )}
           {chatMessages.map((msg) => (
-            <ChatBubble key={msg.id} msg={msg} />
+            <ChatBubble key={msg.id} msg={msg} onAction={handleAction} />
           ))}
           {loading && (
             <div className="flex gap-2 text-xs text-muted">
@@ -264,9 +324,22 @@ export default function ChatSidebar() {
   );
 }
 
-function ChatBubble({ msg }: { msg: ChatMessage }) {
+function parseActions(raw: string): { content: string; actions: ChatAction[] } {
+  const sep = '---actions---';
+  const idx = raw.lastIndexOf(sep);
+  if (idx === -1) return { content: raw.trim(), actions: [] };
+  const content = raw.slice(0, idx).trim();
+  try {
+    const actions = JSON.parse(raw.slice(idx + sep.length).trim()) as ChatAction[];
+    return { content, actions: Array.isArray(actions) ? actions : [] };
+  } catch {
+    return { content, actions: [] };
+  }
+}
+
+function ChatBubble({ msg, onAction }: { msg: ChatMessage; onAction: (a: ChatAction) => void }) {
   return (
-    <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+    <div className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
       <div
         className={`max-w-[85%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap leading-relaxed select-text ${
           msg.role === 'user'
@@ -276,6 +349,20 @@ function ChatBubble({ msg }: { msg: ChatMessage }) {
       >
         {msg.content}
       </div>
+      {msg.actions && msg.actions.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mt-1.5 max-w-[85%]">
+          {msg.actions.map((action, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => onAction(action)}
+              className="px-2.5 py-1 text-xs rounded-full border border-accent/40 text-accent-light hover:bg-accent/20 hover:border-accent transition-colors"
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

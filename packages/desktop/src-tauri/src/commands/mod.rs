@@ -1697,6 +1697,46 @@ fn write_arch_manifest(root: &std::path::Path) {
         serde_json::to_string_pretty(&arch).unwrap_or_default());
 }
 
+/// Scan a source file (typically main.ts) for named imports from a given relative module path
+/// and return the list of imported names. E.g. given feature_name "diary" and a line:
+///   import { initializeDiary, cancelEdit } from "./features/diary/diary"
+/// returns ["initializeDiary", "cancelEdit"].
+fn extract_required_exports_from_main(main_content: &str, feature_name: &str) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    let feature_slug = feature_name.replace('-', "_"); // handle both kebab and snake
+    for line in main_content.lines() {
+        let t = line.trim();
+        if !t.starts_with("import") { continue; }
+        // Must reference this feature's path (e.g. "./features/diary/", "./diary")
+        let lower = t.to_lowercase();
+        if !lower.contains(&format!("/{}", feature_name))
+            && !lower.contains(&format!("/{}", feature_slug))
+            && !lower.contains(&format!("\"{}\"", feature_name))
+            && !lower.contains(&format!("'{}'", feature_name))
+        {
+            continue;
+        }
+        // Extract named imports: import { A, B, C } from "..."
+        if let (Some(open), Some(close)) = (t.find('{'), t.find('}')) {
+            let inner = &t[open + 1..close];
+            for part in inner.split(',') {
+                // Handle "name as alias" — we need the original export name
+                let export_name = part.trim()
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("")
+                    .trim_matches(',');
+                if !export_name.is_empty() && export_name != "*" {
+                    names.push(export_name.to_string());
+                }
+            }
+        }
+    }
+    names.sort();
+    names.dedup();
+    names
+}
+
 /// Extract acceptance criteria bullet points from a vibe spec (the ## Acceptance criteria section).
 fn extract_acceptance_criteria(content: &str) -> Vec<String> {
     let mut in_section = false;
@@ -1942,6 +1982,11 @@ pub async fn compile_vibes(root: String) -> Result<String, String> {
         .unwrap_or_default();
     let mut test_manifest_dirty = false;
 
+    // Read current main.ts once so we can extract per-feature import contracts below.
+    let main_ts_content = fs::read_to_string(root_path.join("src/main.ts"))
+        .or_else(|_| fs::read_to_string(root_path.join("src/index.ts")))
+        .unwrap_or_default();
+
     // ── Phase 2: per-feature codegen ──────────────────────────────────────────
     for (name, content) in &features {
         let key = format!("features/{}.md", name);
@@ -1991,6 +2036,22 @@ pub async fn compile_vibes(root: String) -> Result<String, String> {
             })
             .unwrap_or_default();
 
+        // Detect what main.ts already imports from this feature so we can enforce
+        // the export contract and prevent "does not provide an export named X" errors.
+        let required_exports = extract_required_exports_from_main(&main_ts_content, name);
+        let export_contract_block = if required_exports.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "\n## REQUIRED EXPORTS — do not remove or rename these\n\
+                 main.ts currently imports these names from this feature module. \
+                 You MUST export all of them or the app will crash at runtime:\n{}\n\
+                 If the feature no longer needs one of these, keep the export as a no-op \
+                 rather than removing it.\n",
+                required_exports.iter().map(|e| format!("- `{}`", e)).collect::<Vec<_>>().join("\n")
+            )
+        };
+
         let prompt = if existing.is_empty() {
             let base_dir = globs[0].trim_end_matches('/').trim_end_matches("/**");
             let base_dir = if base_dir.is_empty() { "src" } else { base_dir };
@@ -2003,7 +2064,7 @@ There is no existing code yet — generate one or more files that work together 
 {grammar}
 
 {defensive}
-{shared}
+{export_contract}{shared}
 ## Vibe Specification
 ```markdown
 {spec}
@@ -2022,6 +2083,7 @@ Use forward slashes. All files must work together. You may update global project
                 base_dir = base_dir,
                 grammar = GRAMMAR_CONTEXT,
                 defensive = DEFENSIVE_CODING_RULES,
+                export_contract = export_contract_block,
                 shared = shared_context_block,
                 spec = content,
                 never = never_block,
@@ -2039,7 +2101,7 @@ Use forward slashes. All files must work together. You may update global project
 {grammar}
 
 {defensive}
-{shared}
+{export_contract}{shared}
 ## Vibe Specification
 ```markdown
 {spec}
@@ -2059,6 +2121,7 @@ If no changes are needed, output nothing. You may update global project files (i
                 deps = dep_block,
                 grammar = GRAMMAR_CONTEXT,
                 defensive = DEFENSIVE_CODING_RULES,
+                export_contract = export_contract_block,
                 shared = shared_context_block,
                 spec = content,
                 never = never_block,

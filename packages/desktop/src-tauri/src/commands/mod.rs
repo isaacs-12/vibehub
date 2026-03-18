@@ -2327,107 +2327,136 @@ fn repair_missing_css_imports(root: &std::path::Path) -> usize {
     created
 }
 
-/// Run `tsc --noEmit` on the project (if a tsconfig exists) and ask the model to fix any errors.
-/// Returns an empty string on success or a short status message appended to the compile summary.
-async fn validate_and_fix(
-    client: &reqwest::Client,
-    api_key: &str,
-    root_path: &std::path::Path,
-) -> String {
-    if !root_path.join("tsconfig.json").exists() {
-        return String::new();
-    }
-    let out = match std::process::Command::new("npx")
+/// Run `tsc --noEmit` and return the error output, or None if clean / tsc unavailable.
+fn run_tsc(root_path: &std::path::Path) -> Option<String> {
+    let out = std::process::Command::new("npx")
         .args(["tsc", "--noEmit", "--pretty", "false"])
         .current_dir(root_path)
         .output()
-    {
-        Ok(o) => o,
-        Err(_) => return String::new(), // tsc unavailable; skip silently
-    };
-    if out.status.success() {
-        return String::new();
-    }
+        .ok()?;
+    if out.status.success() { return None; }
     let errors = format!(
         "{}{}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
-    let errors = errors.trim();
-    if errors.is_empty() {
-        return String::new();
-    }
+    let errors = errors.trim().to_string();
+    if errors.is_empty() { None } else { Some(errors) }
+}
 
-    // Collect errored TS file paths from lines like: src/main.ts(111,17): error TS...
-    let mut file_paths: Vec<String> = errors
+/// Extract unique errored TS file paths from tsc output lines like:
+///   src/main.ts(111,17): error TS2345: ...
+fn tsc_error_paths(errors: &str) -> Vec<String> {
+    let mut paths: Vec<String> = errors
         .lines()
         .filter_map(|line| {
-            let path_part = line.trim().split('(').next()?.trim();
-            if path_part.ends_with(".ts") || path_part.ends_with(".tsx") {
-                Some(path_part.to_string())
-            } else {
-                None
-            }
+            let p = line.trim().split('(').next()?.trim();
+            if p.ends_with(".ts") || p.ends_with(".tsx") { Some(p.to_string()) } else { None }
         })
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
         .collect();
-    file_paths.sort();
+    paths.sort();
+    paths
+}
 
-    let files_block: String = file_paths
-        .iter()
-        .filter_map(|rel| {
-            let content = fs::read_to_string(root_path.join(rel)).ok()?;
-            Some(format!("===FILE:{}===\n{}\n===ENDFILE===\n\n", rel, content))
-        })
-        .collect();
+/// Iterative validate-and-fix: runs tsc, asks the model to fix errors, then re-checks.
+/// Loops up to MAX_FIX_ROUNDS times so a bad first fix doesn't leave the project broken.
+/// Returns a short summary string appended to the compile result message.
+async fn validate_and_fix(
+    client: &reqwest::Client,
+    api_key: &str,
+    root_path: &std::path::Path,
+) -> String {
+    const MAX_FIX_ROUNDS: usize = 3;
 
-    if files_block.is_empty() {
-        return format!(" ({} TypeScript error(s) found; open console for details)", errors.lines().count());
+    if !root_path.join("tsconfig.json").exists() {
+        return String::new();
     }
 
-    let fix_prompt = format!(
-        r#"Fix the TypeScript compilation errors below. Preserve all existing logic — only change what is needed to fix the errors.
+    let mut total_fixed = 0usize;
+    let mut rounds = 0usize;
+
+    loop {
+        let errors = match run_tsc(root_path) {
+            None => break, // clean — done
+            Some(e) => e,
+        };
+
+        rounds += 1;
+        if rounds > MAX_FIX_ROUNDS {
+            // Exhausted retries — surface the remaining error count
+            let count = errors.lines()
+                .filter(|l| l.contains(": error TS"))
+                .count();
+            return format!(
+                " {} TypeScript error(s) remain after {} fix attempt(s). Check the console.",
+                count, MAX_FIX_ROUNDS
+            );
+        }
+
+        let file_paths = tsc_error_paths(&errors);
+        let files_block: String = file_paths.iter()
+            .filter_map(|rel| {
+                let content = fs::read_to_string(root_path.join(rel)).ok()?;
+                Some(format!("===FILE:{}===\n{}\n===ENDFILE===\n\n", rel, content))
+            })
+            .collect();
+
+        if files_block.is_empty() {
+            // Can't map errors to files — give up gracefully
+            let count = errors.lines().filter(|l| l.contains(": error TS")).count();
+            return format!(" ({} TypeScript error(s); could not locate source files)", count);
+        }
+
+        let fix_prompt = format!(
+            r#"Fix ALL TypeScript compilation errors below. Preserve all existing logic — only change what is needed to fix the errors.
 
 {defensive}
 
-TypeScript errors:
+TypeScript errors (round {round} of {max}):
 ```
 {errors}
 ```
 
 Files to fix:
 {files}
-Output ONLY the fixed files using this format — no JSON, no escaping:
+Output ONLY the fixed files — no JSON, no markdown, no explanation:
 
 ===FILE:path/to/file.ts===
 <full corrected file content>
 ===ENDFILE===
 "#,
-        defensive = DEFENSIVE_CODING_RULES,
-        errors = errors,
-        files = files_block
-    );
+            defensive = DEFENSIVE_CODING_RULES,
+            round = rounds,
+            max = MAX_FIX_ROUNDS,
+            errors = errors,
+            files = files_block,
+        );
 
-    match call_gemini(client, api_key, &fix_prompt).await {
-        Ok(text) => match parse_codegen_response(&text) {
-            Ok(fixes) if !fixes.is_empty() => {
-                let mut fixed = 0usize;
-                for (rel_path, content) in fixes {
-                    let abs = root_path.join(&rel_path);
-                    if abs.exists() && fs::write(&abs, &content).is_ok() {
-                        fixed += 1;
+        match call_gemini(client, api_key, &fix_prompt).await {
+            Ok(text) => match parse_codegen_response(&text) {
+                Ok(fixes) if !fixes.is_empty() => {
+                    for (rel_path, content) in fixes {
+                        let abs = root_path.join(&rel_path);
+                        // Only overwrite files that exist — don't let the model create new ones here
+                        if abs.exists() && fs::write(&abs, &content).is_ok() {
+                            total_fixed += 1;
+                            // Repair any new missing CSS imports the fix may have introduced
+                            repair_missing_css_imports(root_path);
+                        }
                     }
                 }
-                if fixed > 0 {
-                    format!(" Auto-fixed {} TypeScript error(s).", fixed)
-                } else {
-                    String::new()
-                }
-            }
-            _ => String::new(),
-        },
-        Err(_) => String::new(),
+                _ => break, // model returned nothing useful — stop
+            },
+            Err(_) => break,
+        }
+    }
+
+    if total_fixed > 0 {
+        format!(" Auto-fixed TypeScript errors in {} pass(es).", rounds)
+    } else {
+        String::new()
     }
 }
 

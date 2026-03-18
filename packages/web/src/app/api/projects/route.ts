@@ -29,6 +29,11 @@ export async function POST(request: Request) {
       owner: body.owner.trim(),
       repo: body.repo.trim(),
       description: body.description?.trim() ?? '',
+      forkedFromId: body.forkedFromId ?? null,
+      compiledWith: body.compiledWith ?? null,
+      visibility: (body.visibility ?? 'public') as 'public' | 'unlisted' | 'private',
+      starCount: 0,
+      forkCount: 0,
       createdAt: now,
       updatedAt: now,
     };

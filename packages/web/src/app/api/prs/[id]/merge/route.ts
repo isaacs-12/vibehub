@@ -76,6 +76,24 @@ export async function POST(req: Request, { params }: Params) {
     });
   }
 
+  // Create an immutable spec snapshot of the merged state
+  const latestSnapshot = await store.getLatestSnapshot(project.id);
+  await store.createSnapshot({
+    id: crypto.randomUUID(),
+    projectId: project.id,
+    version: 0, // auto-assigned by store
+    features: merged.map(({ path, content }) => ({
+      slug: path.split('/').pop()?.replace('.md', '') ?? path,
+      content,
+    })),
+    message: pr.title,
+    author: pr.author,
+    prId: pr.id,
+    parentSnapshotId: latestSnapshot?.id ?? null,
+    forkedFromSnapshotId: null,
+    createdAt: now,
+  });
+
   // Mark PR merged, store merged vibes in intentDiff for the compile job
   const mergedPR = {
     ...pr,

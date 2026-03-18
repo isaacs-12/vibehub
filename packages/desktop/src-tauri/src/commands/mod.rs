@@ -1275,7 +1275,13 @@ Defensive coding requirements (MANDATORY — prevents runtime crashes):
 - Never use placeholder/stub implementations like console.log('TODO') for core features. \
   Every function described in the spec MUST have a working implementation with visible UI output.
 - For charts/plots, use inline Canvas 2D or SVG rendering. Do NOT import external charting libraries \
-  unless they are already in package.json. Draw directly on a <canvas> element.";
+  unless they are already in package.json. Draw directly on a <canvas> element.
+- DATA PERSISTENCE: All user data MUST be persisted to localStorage using stable, predictable keys. \
+  Use the pattern `vibe:{EntityName}` where EntityName matches the Data: grammar field (e.g. `vibe:BankAccount`). \
+  On app init, ALWAYS load existing data from localStorage before rendering. On every mutation, save back. \
+  This ensures user data survives recompilation. Never use random or timestamp-based keys. \
+  Example: `const items = JSON.parse(localStorage.getItem('vibe:BankAccount') || '[]');` on init, \
+  and `localStorage.setItem('vibe:BankAccount', JSON.stringify(items));` after every change.";
 
 async fn call_gemini(client: &reqwest::Client, api_key: &str, prompt: &str) -> Result<String, String> {
     let model = codegen_model();
@@ -2133,17 +2139,35 @@ pub async fn compile_vibes(root: String) -> Result<String, String> {
         let integration_block = build_integration_context(content, &vibe_dir.join("integrations"));
 
         // Build dependency context from Uses: grammar field.
-        let dep_block: String = extract_frontmatter(content)
+        let (dep_block, unresolved_uses) = extract_frontmatter(content)
             .map(|fm| {
                 let uses = parse_fm_inline_list(fm, "Uses");
-                uses.iter().flat_map(|grammar_name| {
+                let mut resolved = String::new();
+                let mut unresolved: Vec<String> = Vec::new();
+                for grammar_name in &uses {
                     let slug = grammar_name_to_slug(grammar_name);
-                    feature_map.get(&slug).map(|dep_content| {
-                        format!("### dependency: {}\n```markdown\n{}\n```\n\n", grammar_name, dep_content)
-                    })
-                }).collect::<String>()
+                    if let Some(dep_content) = feature_map.get(&slug) {
+                        resolved.push_str(&format!("### dependency: {}\n```markdown\n{}\n```\n\n", grammar_name, dep_content));
+                    } else {
+                        unresolved.push(grammar_name.clone());
+                    }
+                }
+                (resolved, unresolved)
             })
             .unwrap_or_default();
+
+        // Warn model about unresolved Uses: references so it doesn't hallucinate them.
+        let unresolved_warning = if unresolved_uses.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "\n## WARNING: Unresolved dependencies\n\
+                 The spec references these in Uses: but they do NOT exist as features: {}\n\
+                 Do NOT import, reference, or invent modules/classes/stores for these names. \
+                 Use the Data: entities with localStorage instead.\n\n",
+                unresolved_uses.join(", ")
+            )
+        };
 
         // Detect what main.ts already imports from this feature so we can enforce
         // the export contract and prevent "does not provide an export named X" errors.
@@ -2168,7 +2192,7 @@ pub async fn compile_vibes(root: String) -> Result<String, String> {
                 r#"You are a senior software engineer. Create NEW code that implements this specification.
 There is no existing code yet — generate one or more files that work together (imports, entry points, etc.).
 {lang}.
-{interactive}{deps}Do NOT derive file names from the vibe document name (e.g. "overview.md"). Name files by the feature's purpose and use conventional, best-practice naming for the language and project (e.g. calculator.py, components/Calculator.tsx). Place all files under {base_dir}/.
+{interactive}{deps}{unresolved_warning}Do NOT derive file names from the vibe document name (e.g. "overview.md"). Name files by the feature's purpose and use conventional, best-practice naming for the language and project (e.g. calculator.py, components/Calculator.tsx). Place all files under {base_dir}/.
 
 {grammar}
 
@@ -2189,6 +2213,7 @@ Use forward slashes. All files must work together. You may update global project
                 lang = lang_instruction,
                 interactive = interactive_block,
                 deps = dep_block,
+                unresolved_warning = unresolved_warning,
                 base_dir = base_dir,
                 grammar = GRAMMAR_CONTEXT,
                 defensive = DEFENSIVE_CODING_RULES,
@@ -2207,7 +2232,7 @@ Use forward slashes. All files must work together. You may update global project
             format!(
                 r#"You are a senior software engineer. Update the existing code to implement this specification.
 {lang}.
-{interactive}{deps}You may modify existing files and/or add new ones. All output files must work together (correct imports, exports, entry points).
+{interactive}{deps}{unresolved_warning}You may modify existing files and/or add new ones. All output files must work together (correct imports, exports, entry points).
 
 {grammar}
 
@@ -2230,6 +2255,7 @@ If no changes are needed, output nothing. You may update global project files (i
                 lang = lang_instruction,
                 interactive = interactive_block,
                 deps = dep_block,
+                unresolved_warning = unresolved_warning,
                 grammar = GRAMMAR_CONTEXT,
                 defensive = DEFENSIVE_CODING_RULES,
                 export_contract = export_contract_block,

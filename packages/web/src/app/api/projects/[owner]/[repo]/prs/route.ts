@@ -50,11 +50,33 @@ export async function POST(request: Request, { params }: Params) {
     } : undefined,
   };
 
-  await getStore().upsertPR(pr);
+  const store = getStore();
+  await store.upsertPR(pr);
+
+  // If the PR includes new features and no base was provided, snapshot current state as base
+  if (features.length > 0 && baseFeatures.length === 0) {
+    const currentFeatures = await store.listFeatures(project.id);
+    if (currentFeatures.length > 0) {
+      const latestSnapshot = await store.getLatestSnapshot(project.id);
+      if (!latestSnapshot) {
+        // No snapshot exists yet — create one to represent the base state
+        await store.createSnapshot({
+          id: crypto.randomUUID(),
+          projectId: project.id,
+          version: 0,
+          features: currentFeatures.map((f) => ({ slug: f.slug, content: f.content })),
+          message: 'Base state before PR',
+          parentSnapshotId: null,
+          forkedFromSnapshotId: null,
+          createdAt: now,
+        });
+      }
+    }
+  }
 
   // Enqueue a cloud compile job so the agent can produce robust implementation proofs.
   const job: CompileJob = { id: crypto.randomUUID(), prId: pr.id, status: 'pending', createdAt: now };
-  await getStore().createCompileJob(job);
+  await store.createCompileJob(job);
 
   return NextResponse.json(pr, { status: 201 });
 }

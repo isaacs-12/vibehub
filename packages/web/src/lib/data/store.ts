@@ -549,10 +549,19 @@ class PostgresStore implements Store {
     const { projects } = await this.schema();
     await db.insert(projects).values({
       id: p.id, owner: p.owner, repo: p.repo, description: p.description,
+      forkedFromId: p.forkedFromId ?? null, compiledWith: p.compiledWith ?? null,
+      visibility: p.visibility ?? 'public', starCount: p.starCount ?? 0, forkCount: p.forkCount ?? 0,
       createdAt: new Date(p.createdAt), updatedAt: new Date(p.updatedAt),
     }).onConflictDoUpdate({
       target: projects.id,
-      set: { description: p.description, updatedAt: new Date(p.updatedAt) },
+      set: {
+        description: p.description,
+        compiledWith: p.compiledWith ?? null,
+        visibility: p.visibility ?? 'public',
+        starCount: p.starCount ?? 0,
+        forkCount: p.forkCount ?? 0,
+        updatedAt: new Date(p.updatedAt),
+      },
     });
   }
 

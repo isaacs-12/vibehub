@@ -38,7 +38,36 @@ export async function POST(request: Request) {
       updatedAt: now,
     };
 
-    await getStore().upsertProject(project);
+    const store = getStore();
+    await store.upsertProject(project);
+
+    // If features are provided (e.g. from import), create initial snapshot
+    const features: { slug: string; content: string }[] = Array.isArray(body.features) ? body.features : [];
+    if (features.length > 0) {
+      for (const f of features) {
+        await store.upsertFeature({
+          id: crypto.randomUUID(),
+          projectId: project.id,
+          name: f.slug,
+          slug: f.slug,
+          content: f.content,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+      await store.createSnapshot({
+        id: crypto.randomUUID(),
+        projectId: project.id,
+        version: 0,
+        features,
+        message: 'Initial import',
+        author: body.owner,
+        parentSnapshotId: null,
+        forkedFromSnapshotId: null,
+        createdAt: now,
+      });
+    }
+
     return NextResponse.json(project, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

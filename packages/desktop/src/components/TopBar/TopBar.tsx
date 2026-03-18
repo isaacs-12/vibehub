@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Zap, MessageSquare, FolderOpen, Loader2, Play, Square, Code2 } from 'lucide-react';
+import { Zap, MessageSquare, FolderOpen, Loader2, Play, Square, Code2, PenTool, Wrench } from 'lucide-react';
 import { useVibeStore } from '../../store/index.ts';
+import type { AppMode } from '../../store/index.ts';
 import { useVibeProject } from '../../hooks/useVibeProject.ts';
 
 export default function TopBar() {
@@ -8,6 +9,7 @@ export default function TopBar() {
     setChatOpen, chatOpen, isDirty, selectedFeature, saveFeature,
     projectRoot, setCodePeekFiles, clearRunOutput, setRunOutputVisible,
     codePeekVisible, toggleCodePeek, runInProgress, setRunInProgress,
+    appMode, setAppMode,
   } = useVibeStore();
   const { openProject } = useVibeProject();
   const [vibeLoading, setVibeLoading] = useState(false);
@@ -86,9 +88,10 @@ export default function TopBar() {
 
   return (
     <header className="flex items-center justify-between h-10 px-4 bg-surface-raised border-b border-surface-border shrink-0">
-      {/* Left: app name + open project */}
+      {/* Left: app name + mode toggle + open project */}
       <div className="flex items-center gap-3">
         <span className="font-semibold text-accent-light text-sm tracking-wide">Vibe Studio</span>
+        <ModeToggle mode={appMode} onChange={setAppMode} />
         <button
           onClick={handleOpenProject}
           className="flex items-center gap-1.5 text-xs text-muted hover:text-gray-200 transition-colors"
@@ -98,15 +101,27 @@ export default function TopBar() {
         </button>
       </div>
 
-      {/* Center: current file breadcrumb */}
+      {/* Center: project name + breadcrumb */}
       <div className="text-xs text-muted truncate max-w-sm">
-        {selectedFeature ? (
-          <span>
-            features / <span className="text-gray-200">{selectedFeature.name}</span>
-            {isDirty && <span className="ml-1 text-accent-light">●</span>}
-          </span>
+        {appMode === 'editor' ? (
+          <>
+            {projectRoot && (
+              <span className="text-gray-400 mr-1.5">
+                {projectRoot.split('/').pop() ?? projectRoot}
+                {selectedFeature ? ' /' : ''}
+              </span>
+            )}
+            {selectedFeature ? (
+              <span>
+                <span className="text-gray-200">{selectedFeature.name}</span>
+                {isDirty && <span className="ml-1 text-accent-light">●</span>}
+              </span>
+            ) : (
+              !projectRoot && <span>No project open</span>
+            )}
+          </>
         ) : (
-          <span>No feature selected</span>
+          <span className="text-gray-300">All Tools</span>
         )}
       </div>
 
@@ -163,5 +178,34 @@ export default function TopBar() {
         </button>
       </div>
     </header>
+  );
+}
+
+function ModeToggle({ mode, onChange }: { mode: AppMode; onChange: (m: AppMode) => void }) {
+  return (
+    <div className="flex items-center bg-surface border border-surface-border rounded overflow-hidden">
+      <button
+        onClick={() => onChange('editor')}
+        className={`flex items-center gap-1 px-2 py-0.5 text-xs transition-colors ${
+          mode === 'editor'
+            ? 'bg-accent/20 text-accent-light'
+            : 'text-muted hover:text-gray-200'
+        }`}
+      >
+        <PenTool size={10} />
+        Editor
+      </button>
+      <button
+        onClick={() => onChange('tools')}
+        className={`flex items-center gap-1 px-2 py-0.5 text-xs transition-colors ${
+          mode === 'tools'
+            ? 'bg-accent/20 text-accent-light'
+            : 'text-muted hover:text-gray-200'
+        }`}
+      >
+        <Wrench size={10} />
+        Tools
+      </button>
+    </div>
   );
 }

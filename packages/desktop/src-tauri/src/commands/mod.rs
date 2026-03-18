@@ -1207,7 +1207,10 @@ pub async fn pull_from_remote(root: String) -> Result<Vec<VibeFileEntry>, String
 
 // ─── AI Commands ──────────────────────────────────────────────────────────────
 
-const CODEGEN_MODEL: &str = "gemini-2.5-flash-lite";
+/// Default codegen model. Can be overridden via VIBE_MODEL env var.
+fn codegen_model() -> String {
+    std::env::var("VIBE_MODEL").unwrap_or_else(|_| "gemini-2.5-flash-lite".to_string())
+}
 const MAX_FILE_CHARS: usize = 8_000;
 
 /// Shared grammar reference injected into every AI prompt.
@@ -1226,6 +1229,7 @@ Never:                              # Hard constraints the compiler must never v
   - do not store passwords in plain text
   - never expose internal user IDs to the client
 Connects: [GoogleSheets, Stripe]    # PascalCase — external service integrations this feature uses
+Variables: [API_KEY, SECRET_TOKEN]  # Environment/config variables this feature needs at runtime
 ---
 
 # Feature Title
@@ -1247,7 +1251,8 @@ Naming rules:
 - `Uses` declares compile-time dependencies — the compiler will inject the content of those features as context
 - `Data` declares data shape ownership — used to detect cross-feature data coupling
 - `Never` entries are hard constraints forwarded verbatim to the compiler as prohibited behaviours
-- `Connects` declares external service integrations — each name must match a .vibe/integrations/{Name}.yaml file";
+- `Connects` declares external service integrations — each name must match a .vibe/integrations/{Name}.md file
+- `Variables` declares runtime config variables — names should be SCREAMING_SNAKE_CASE. These are values the user must provide when setting up the tool (API keys, config values, etc.)";
 
 /// Defensive coding rules injected into every codegen prompt.
 /// Prevents the most common class of runtime crashes in generated code.
@@ -1256,18 +1261,27 @@ Defensive coding requirements (MANDATORY — prevents runtime crashes):
 - Null-check every DOM query before use. If a required container is missing, CREATE it: \
   let el = document.getElementById('x'); if (!el) { el = document.createElement('div'); el.id = 'x'; document.body.appendChild(el); }
 - Never silently return when a required container is missing — that hides bugs. Create the element instead.
-- Wrap top-level DOM access in DOMContentLoaded if the script may run before the body is parsed
+- ALL DOM queries (getElementById, querySelector) MUST be inside DOMContentLoaded or a function called after DOMContentLoaded. \
+  NEVER put getElementById calls at the top level of a module — they will get null because the DOM is not ready yet.
 - Use optional chaining (?.) for any property that might be null or undefined
 - Wrap async initialisation in try/catch and display errors in the UI, not just console.error
 - Never call methods on a value that could be null without a prior null guard
 - EVERY file you import with a relative path MUST be included in your output. \
   If you write `import './style.css'` you MUST also output a `style.css` file block. \
-  Never import a file you are not generating — it will crash the build.";
+  If you write `import { foo } from './utils'` you MUST also output a `utils.ts` file block that exports `foo`. \
+  Never import a file you are not generating — it will crash the build at load time.
+- index.html MUST include `<script type=\"module\" src=\"/src/main.ts\"></script>` before </body>. \
+  Without this script tag the app will render as a blank page. This is the #1 most common bug.
+- Never use placeholder/stub implementations like console.log('TODO') for core features. \
+  Every function described in the spec MUST have a working implementation with visible UI output.
+- For charts/plots, use inline Canvas 2D or SVG rendering. Do NOT import external charting libraries \
+  unless they are already in package.json. Draw directly on a <canvas> element.";
 
 async fn call_gemini(client: &reqwest::Client, api_key: &str, prompt: &str) -> Result<String, String> {
+    let model = codegen_model();
     let url = format!(
         "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-        CODEGEN_MODEL, api_key
+        model, api_key
     );
     let body = serde_json::json!({
         "contents": [{ "role": "user", "parts": [{ "text": prompt }] }]
@@ -1595,7 +1609,43 @@ Output using this format only:
             written += 1;
         }
     }
+
+    // ── Post-generation repair: ensure index.html loads main.ts ──────────────
+    // The model sometimes forgets the <script> tag, which makes the page blank.
+    repair_html_script_tag(root_path);
+
     written
+}
+
+/// Ensure index.html contains a <script type="module"> tag that loads the entry point.
+/// Without this, the generated app renders as a blank page.
+fn repair_html_script_tag(root: &std::path::Path) {
+    let html_path = root.join("index.html");
+    let Ok(mut html) = fs::read_to_string(&html_path) else { return };
+
+    // Detect which entry point exists
+    let entry = if root.join("src/main.ts").exists() {
+        "/src/main.ts"
+    } else if root.join("src/index.ts").exists() {
+        "/src/index.ts"
+    } else {
+        return; // No entry point to link
+    };
+
+    // Check if there's already a script tag pointing to the entry
+    if html.contains(entry) {
+        return; // Already present
+    }
+
+    // Insert before </body>
+    let script_tag = format!(r#"    <script type="module" src="{}"></script>"#, entry);
+    if let Some(pos) = html.rfind("</body>") {
+        html.insert_str(pos, &format!("{}\n", script_tag));
+    } else {
+        // No </body> tag — append at end
+        html.push_str(&format!("\n{}\n", script_tag));
+    }
+    let _ = fs::write(&html_path, html);
 }
 
 // ─── Architecture manifest helpers ───────────────────────────────────────────
@@ -1987,6 +2037,62 @@ pub async fn compile_vibes(root: String) -> Result<String, String> {
         .or_else(|_| fs::read_to_string(root_path.join("src/index.ts")))
         .unwrap_or_default();
 
+    // ── Build shared Data schema ─────────────────────────────────────────────
+    // Collect all Data: entities across features and build a shared schema block
+    // so every feature works with the same data structures instead of inventing its own.
+    let mut all_data_entities: Vec<String> = Vec::new();
+    let mut data_owners: HashMap<String, Vec<String>> = HashMap::new(); // entity → features that use it
+    for (name, content) in &features {
+        if let Some(fm) = extract_frontmatter(content) {
+            let entities = parse_fm_inline_list(fm, "Data");
+            for entity in &entities {
+                if !all_data_entities.contains(entity) {
+                    all_data_entities.push(entity.clone());
+                }
+                data_owners.entry(entity.clone()).or_default().push(name.clone());
+            }
+        }
+    }
+    // Check if a shared data module already exists; if so, include it as the canonical schema.
+    let data_module_content = ["src/data.ts", "src/store.ts", "src/types.ts", "src/utils.ts"]
+        .iter()
+        .find_map(|p| {
+            let content = fs::read_to_string(root_path.join(p)).ok()?;
+            if content.contains("interface") || content.contains("type ") {
+                Some((p.to_string(), content))
+            } else {
+                None
+            }
+        });
+    let shared_data_block: String = if all_data_entities.is_empty() {
+        String::new()
+    } else {
+        let entity_list = all_data_entities.iter()
+            .map(|e| {
+                let owners = data_owners.get(e).map(|v| v.join(", ")).unwrap_or_default();
+                format!("- {} (used by: {})", e, owners)
+            })
+            .collect::<Vec<_>>().join("\n");
+        let existing_schema = data_module_content
+            .map(|(path, content)| {
+                format!(
+                    "\n\nExisting shared data module (`{}`) — import types from here, do NOT redefine them:\n```typescript\n{}\n```",
+                    path, content
+                )
+            })
+            .unwrap_or_else(|| {
+                "\n\nNo shared data module exists yet. If you are the first feature compiled, \
+                 create `src/data.ts` that exports interfaces for all entities listed above. \
+                 Other features will import from it.".to_string()
+            });
+        format!(
+            "\n## Shared Data Entities\n\
+             These data types are shared across multiple features. ALL features MUST use the same \
+             interfaces/types — never redefine or hallucinate data structures.\n{}\n{}\n",
+            entity_list, existing_schema
+        )
+    };
+
     // ── Phase 2: per-feature codegen ──────────────────────────────────────────
     for (name, content) in &features {
         let key = format!("features/{}.md", name);
@@ -2067,7 +2173,7 @@ There is no existing code yet — generate one or more files that work together 
 {grammar}
 
 {defensive}
-{export_contract}{integrations}{shared}
+{export_contract}{integrations}{data_schema}{shared}
 ## Vibe Specification
 ```markdown
 {spec}
@@ -2088,6 +2194,7 @@ Use forward slashes. All files must work together. You may update global project
                 defensive = DEFENSIVE_CODING_RULES,
                 export_contract = export_contract_block,
                 integrations = integration_block,
+                data_schema = shared_data_block,
                 shared = shared_context_block,
                 spec = content,
                 never = never_block,
@@ -2105,7 +2212,7 @@ Use forward slashes. All files must work together. You may update global project
 {grammar}
 
 {defensive}
-{export_contract}{integrations}{shared}
+{export_contract}{integrations}{data_schema}{shared}
 ## Vibe Specification
 ```markdown
 {spec}
@@ -2127,6 +2234,7 @@ If no changes are needed, output nothing. You may update global project files (i
                 defensive = DEFENSIVE_CODING_RULES,
                 export_contract = export_contract_block,
                 integrations = integration_block,
+                data_schema = shared_data_block,
                 shared = shared_context_block,
                 spec = content,
                 never = never_block,
@@ -2192,9 +2300,16 @@ If no changes are needed, output nothing. You may update global project files (i
 
     // Repair missing CSS/asset imports before tsc runs (Vite fails on these before TS even checks).
     repair_missing_css_imports(&root_path);
+    // Ensure index.html has the script tag (model often forgets it).
+    repair_html_script_tag(&root_path);
 
     // Post-generation: type-check TypeScript and auto-fix any errors
     let fix_note = validate_and_fix(&client, &api_key, &root_path).await;
+
+    // ── Tool manifest: write .vibe/tool-manifest.json and register in global registry ──
+    let _ = write_tool_manifest(&root_path);
+    let _ = register_tool(&root);
+
     Ok(format!(
         "Compilation finished. {} feature(s) processed, {} file(s) written.{}",
         features.len(),
@@ -2473,7 +2588,8 @@ pub async fn chat_with_vibes(
 
     let client = reqwest::Client::new();
     let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key={api_key}"
+        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={api_key}",
+            codegen_model()
     );
 
     // Build contents array (history + new user message)
@@ -2606,7 +2722,8 @@ pub async fn apply_chat_to_vibe_file(
 
     let client = reqwest::Client::new();
     let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key={api_key}"
+        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={api_key}",
+            codegen_model()
     );
 
     let prompt = format!(
@@ -2618,9 +2735,12 @@ Target file: **{feature_name}**
 
 Rules for applying edits:
 1. Only apply changes relevant to **{feature_name}**. The assistant's message may contain content for other feature files — ignore those entirely.
-2. If the current file has grammar frontmatter (---...---), preserve it and update it to reflect any new dependencies, entities, or constraints implied by the changes.
-3. If the current file has no grammar frontmatter, add it at the top with appropriate values inferred from the content.
-4. All names in Uses and Data must be PascalCase (e.g. UserAuthentication, PaymentMethod).
+2. PRESERVE all existing content that the assistant did NOT explicitly change. This is critical — the current file contains \
+detailed specs that must not be lost. Only add, modify, or remove content that the assistant specifically suggested changing.
+3. If the current file has grammar frontmatter (---...---), preserve it and update it to reflect any new dependencies, entities, or constraints implied by the changes.
+4. If the current file has no grammar frontmatter, add it at the top with appropriate values inferred from the content.
+5. All names in Uses and Data must be PascalCase (e.g. UserAuthentication, PaymentMethod).
+6. Never reduce the level of detail. If the original has specific bullet points, keep them. Only remove content the assistant explicitly said to remove.
 
 Current file content:
 ```markdown
@@ -2802,5 +2922,298 @@ pub async fn write_integration_file(root: String, service_name: String, content:
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     fs::write(&path, content.as_bytes()).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Create a new vibe project: scaffolds .vibe/features/, a starter feature, and Vite app skeleton.
+#[tauri::command]
+pub async fn create_new_project(path: String, name: String) -> Result<(), String> {
+    let root = PathBuf::from(&path);
+    fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+
+    // Scaffold .vibe/features/ with a starter feature
+    let features_dir = root.join(".vibe").join("features");
+    fs::create_dir_all(&features_dir).map_err(|e| e.to_string())?;
+
+    let starter = format!(
+        r#"---
+Uses: []
+Data: []
+Never:
+  - do not use alert() or document.write()
+Variables: []
+Connects: []
+---
+
+# {name}
+
+## What it does
+Describe what this tool does.
+
+## Behavior
+- Add specific rules and edge cases here
+
+## Acceptance criteria
+- How do you know this tool is working correctly?
+"#,
+        name = name,
+    );
+    fs::write(
+        features_dir.join("overview.md"),
+        starter.as_bytes(),
+    ).map_err(|e| e.to_string())?;
+
+    // Scaffold Vite app skeleton
+    scaffold_vite_app(&root)?;
+
+    // Init git
+    let repo = git2::Repository::init(&root).map_err(|e| e.to_string())?;
+    {
+        let sig = repo.signature().unwrap_or_else(|_|
+            git2::Signature::now("Vibe Studio", "vibe@local").unwrap()
+        );
+        let mut index = repo.index().map_err(|e| e.to_string())?;
+        index.add_all(["*"], git2::IndexAddOption::DEFAULT, None).map_err(|e| e.to_string())?;
+        index.write().map_err(|e| e.to_string())?;
+        let oid = index.write_tree().map_err(|e| e.to_string())?;
+        let tree = repo.find_tree(oid).map_err(|e| e.to_string())?;
+        repo.commit(Some("HEAD"), &sig, &sig, "Initial vibe project", &tree, &[])
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+// ─── Tool Registry & Manifest ────────────────────────────────────────────────
+
+/// A variable a tool requires to function (e.g. API key, config value).
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ToolVariable {
+    pub name: String,
+    pub description: String,
+    pub required: bool,
+}
+
+/// Manifest written to .vibe/tool-manifest.json after compilation.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ToolManifest {
+    pub name: String,
+    pub description: String,
+    pub variables: Vec<ToolVariable>,
+    pub connects: Vec<String>,
+}
+
+/// An entry in the global tool registry (~/.vibehub/tools.json).
+#[derive(Serialize, Deserialize, Clone)]
+pub struct ToolRegistryEntry {
+    pub root: String,
+    pub name: String,
+    pub description: String,
+    pub variables: Vec<ToolVariable>,
+    pub connects: Vec<String>,
+}
+
+fn tools_registry_path() -> PathBuf {
+    vibehub_data_dir().join("tools.json")
+}
+
+fn vibehub_data_dir() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home).join(".vibehub")
+}
+
+fn read_tools_registry() -> Vec<ToolRegistryEntry> {
+    let path = tools_registry_path();
+    fs::read_to_string(&path)
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn write_tools_registry(entries: &[ToolRegistryEntry]) -> Result<(), String> {
+    let path = tools_registry_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let json = serde_json::to_string_pretty(entries).map_err(|e| e.to_string())?;
+    fs::write(&path, json).map_err(|e| e.to_string())
+}
+
+/// Register a compiled project as a tool in the global registry.
+/// Called after compile_vibes writes tool-manifest.json.
+fn register_tool(root: &str) -> Result<(), String> {
+    let manifest_path = PathBuf::from(root).join(".vibe").join("tool-manifest.json");
+    let raw = fs::read_to_string(&manifest_path).map_err(|e| e.to_string())?;
+    let manifest: ToolManifest = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+
+    let mut registry = read_tools_registry();
+    // Upsert: remove old entry for this root, then add new one.
+    registry.retain(|e| e.root != root);
+    registry.push(ToolRegistryEntry {
+        root: root.to_string(),
+        name: manifest.name,
+        description: manifest.description,
+        variables: manifest.variables,
+        connects: manifest.connects,
+    });
+    write_tools_registry(&registry)
+}
+
+/// Ensure a project with .vibe/features/ is registered as a tool.
+/// Generates tool-manifest.json if missing, then upserts the registry.
+#[tauri::command]
+pub async fn register_project_as_tool(root: String) -> Result<(), String> {
+    let root_path = PathBuf::from(&root);
+    let features_dir = root_path.join(".vibe").join("features");
+    if !features_dir.exists() {
+        return Ok(()); // Not a vibe project — nothing to register
+    }
+    // Generate manifest if it doesn't exist or refresh it
+    write_tool_manifest(&root_path)?;
+    register_tool(&root)
+}
+
+/// List all known tools from the global registry.
+#[tauri::command]
+pub async fn list_tools() -> Result<Vec<ToolRegistryEntry>, String> {
+    Ok(read_tools_registry())
+}
+
+/// Remove a tool from the registry (does not delete project files).
+#[tauri::command]
+pub async fn unregister_tool(root: String) -> Result<(), String> {
+    let mut registry = read_tools_registry();
+    registry.retain(|e| e.root != root);
+    write_tools_registry(&registry)
+}
+
+/// Read the tool config (.vibe/tool-config.json) — user-supplied variable values.
+#[tauri::command]
+pub async fn read_tool_config(root: String) -> Result<HashMap<String, String>, String> {
+    let path = PathBuf::from(&root).join(".vibe").join("tool-config.json");
+    let raw = fs::read_to_string(&path).unwrap_or_else(|_| "{}".to_string());
+    serde_json::from_str(&raw).map_err(|e| e.to_string())
+}
+
+/// Save user-supplied variable values to .vibe/tool-config.json.
+#[tauri::command]
+pub async fn save_tool_config(root: String, config: HashMap<String, String>) -> Result<(), String> {
+    let path = PathBuf::from(&root).join(".vibe").join("tool-config.json");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let json = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
+    fs::write(&path, json).map_err(|e| e.to_string())
+}
+
+/// Extract required variables from all feature specs and integration files.
+/// Variables come from:
+/// 1. Integration frontmatter `requires.env` fields
+/// 2. Explicit `Variables:` grammar field in feature specs
+fn extract_tool_variables(root: &std::path::Path) -> Vec<ToolVariable> {
+    let mut vars: Vec<ToolVariable> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    // From integration files
+    let integrations_dir = root.join(".vibe").join("integrations");
+    if integrations_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&integrations_dir) {
+            for entry in entries.flatten() {
+                let content = fs::read_to_string(entry.path()).unwrap_or_default();
+                if let Some(fm) = extract_frontmatter(&content) {
+                    let env_vars = parse_fm_inline_list(fm, "requires.env");
+                    for v in env_vars {
+                        if seen.insert(v.clone()) {
+                            vars.push(ToolVariable {
+                                name: v.clone(),
+                                description: format!("Required by {} integration", entry.path().file_stem().unwrap_or_default().to_string_lossy()),
+                                required: true,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // From feature specs — look for Variables: field in frontmatter
+    let features_dir = root.join(".vibe").join("features");
+    if features_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&features_dir) {
+            for entry in entries.flatten() {
+                let content = fs::read_to_string(entry.path()).unwrap_or_default();
+                if let Some(fm) = extract_frontmatter(&content) {
+                    let feature_vars = parse_fm_inline_list(fm, "Variables");
+                    for v in feature_vars {
+                        if seen.insert(v.clone()) {
+                            vars.push(ToolVariable {
+                                name: v.clone(),
+                                description: format!("Used by {}", entry.path().file_stem().unwrap_or_default().to_string_lossy()),
+                                required: true,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    vars
+}
+
+/// Build a tool manifest from the current project state.
+fn write_tool_manifest(root: &std::path::Path) -> Result<(), String> {
+    let vibe_dir = root.join(".vibe");
+
+    // Derive name from directory name
+    let name = root.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    // Derive description from the first feature's first paragraph, or folder name
+    let mut description = format!("{} tool", name);
+    let features_dir = vibe_dir.join("features");
+    if features_dir.exists() {
+        if let Ok(mut entries) = fs::read_dir(&features_dir) {
+            if let Some(Ok(entry)) = entries.next() {
+                let content = fs::read_to_string(entry.path()).unwrap_or_default();
+                for line in content.lines() {
+                    let t = line.trim();
+                    if !t.is_empty() && !t.starts_with('#') && !t.starts_with("---")
+                        && !t.starts_with("Uses:") && !t.starts_with("Connects:")
+                        && !t.starts_with("Data:") && !t.starts_with("Never:")
+                        && !t.starts_with("Variables:")
+                    {
+                        description = t.to_string();
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Collect all Connects: across features
+    let mut connects: Vec<String> = Vec::new();
+    if features_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&features_dir) {
+            for entry in entries.flatten() {
+                let content = fs::read_to_string(entry.path()).unwrap_or_default();
+                if let Some(fm) = extract_frontmatter(&content) {
+                    for c in parse_fm_inline_list(fm, "Connects") {
+                        if !connects.contains(&c) {
+                            connects.push(c);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let variables = extract_tool_variables(root);
+
+    let manifest = ToolManifest { name, description, variables, connects };
+    let json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
+    fs::write(vibe_dir.join("tool-manifest.json"), json).map_err(|e| e.to_string())?;
     Ok(())
 }

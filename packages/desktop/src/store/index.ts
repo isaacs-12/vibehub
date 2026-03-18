@@ -27,6 +27,26 @@ export interface ChatSession {
   messages: ChatMessage[];
 }
 
+export type AppMode = 'editor' | 'tools';
+
+export interface ToolVariable {
+  name: string;        // e.g. "OPENAI_API_KEY"
+  description: string; // what it's for
+  required: boolean;
+}
+
+export interface ToolEntry {
+  root: string;        // absolute project path
+  name: string;        // human-friendly tool name
+  description: string; // one-liner from manifest
+  variables: ToolVariable[];
+  connects: string[];  // integration names
+}
+
+export interface ToolConfig {
+  [varName: string]: string; // user-supplied variable values
+}
+
 function createSession(title = 'New chat'): ChatSession {
   return { id: crypto.randomUUID(), title, messages: [] };
 }
@@ -57,6 +77,16 @@ interface VibeStore {
   runOutputVisible: boolean;
   runInProgress: boolean;
 
+  // App mode
+  appMode: AppMode;
+
+  // Tool registry (all known local projects/tools)
+  tools: ToolEntry[];
+  toolConfigs: Record<string, ToolConfig>; // keyed by tool root path
+
+  // New project modal
+  newProjectModalOpen: boolean;
+
   // Actions
   setProjectRoot: (root: string) => void;
   setFeatures: (features: FeatureNode[]) => void;
@@ -79,6 +109,10 @@ interface VibeStore {
   clearRunOutput: () => void;
   setRunOutputVisible: (visible: boolean) => void;
   setRunInProgress: (inProgress: boolean) => void;
+  setAppMode: (mode: AppMode) => void;
+  setTools: (tools: ToolEntry[]) => void;
+  setToolConfig: (root: string, config: ToolConfig) => void;
+  setNewProjectModalOpen: (open: boolean) => void;
   /** Reset all project-specific state and point at a new root. Called on project switch. */
   resetProjectState: (newRoot: string) => void;
 }
@@ -100,6 +134,10 @@ export const useVibeStore = create<VibeStore>((set, get) => ({
   runOutputLines: [],
   runOutputVisible: true,
   runInProgress: false,
+  appMode: 'editor',
+  tools: [],
+  toolConfigs: {},
+  newProjectModalOpen: false,
 
   setProjectRoot: (root) => set({ projectRoot: root }),
   setFeatures: (features) => set({ features }),
@@ -191,6 +229,11 @@ export const useVibeStore = create<VibeStore>((set, get) => ({
   clearRunOutput: () => set({ runOutputLines: [] }),
   setRunOutputVisible: (visible) => set({ runOutputVisible: visible }),
   setRunInProgress: (inProgress) => set({ runInProgress: inProgress }),
+  setAppMode: (mode) => set({ appMode: mode }),
+  setTools: (tools) => set({ tools }),
+  setToolConfig: (root, config) =>
+    set((s) => ({ toolConfigs: { ...s.toolConfigs, [root]: config } })),
+  setNewProjectModalOpen: (open) => set({ newProjectModalOpen: open }),
   resetProjectState: (newRoot) => {
     const fresh = createSession('Chat 1');
     set({
@@ -206,6 +249,7 @@ export const useVibeStore = create<VibeStore>((set, get) => ({
       branches: [],
       runOutputLines: [],
       runInProgress: false,
+      appMode: 'editor',
     });
   },
 }));

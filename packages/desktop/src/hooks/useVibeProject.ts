@@ -1,9 +1,9 @@
 import { useCallback } from 'react';
 import { useVibeStore } from '../store/index.ts';
-import type { ChatSession, FeatureNode } from '../store/index.ts';
+import type { ChatSession, FeatureNode, ToolEntry, ToolConfig } from '../store/index.ts';
 
 export function useVibeProject() {
-  const { resetProjectState, setFeatures, setGitBranch, setChatSessions } = useVibeStore();
+  const { resetProjectState, setFeatures, setGitBranch, setChatSessions, setTools, setToolConfig } = useVibeStore();
 
   const openProject = useCallback(async (root: string) => {
     const { invoke } = await import('@tauri-apps/api/core');
@@ -60,7 +60,25 @@ export function useVibeProject() {
     } catch {
       // No saved chats — the fresh session from resetProjectState is fine
     }
-  }, [resetProjectState, setFeatures, setGitBranch, setChatSessions]);
+
+    // ── 6. Register project as a tool and refresh tools list ─────────────────
+    try {
+      await invoke('register_project_as_tool', { root });
+      const tools = await invoke<ToolEntry[]>('list_tools');
+      setTools(tools);
+      // Load configs for all tools
+      for (const tool of tools) {
+        try {
+          const config = await invoke<Record<string, string>>('read_tool_config', { root: tool.root });
+          setToolConfig(tool.root, config);
+        } catch {
+          // No config yet
+        }
+      }
+    } catch {
+      // Non-fatal — tools view will just be empty
+    }
+  }, [resetProjectState, setFeatures, setGitBranch, setChatSessions, setTools, setToolConfig]);
 
   return { openProject };
 }

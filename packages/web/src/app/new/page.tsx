@@ -84,7 +84,7 @@ export default function NewProjectPage() {
         <ModeButton
           active={mode === 'import'}
           icon={<GitBranch size={15} />}
-          label="Import existing repo"
+          label="(beta) Import existing codebase"
           description="Extract features from a Git repository"
           onClick={() => setMode('import')}
         />

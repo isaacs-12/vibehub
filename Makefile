@@ -281,7 +281,7 @@ deploy-web: gcp-check
 # Build + deploy agent worker to Cloud Run
 deploy-agent: gcp-check
 	@echo "  Building agent image…"
-	docker build -t $(GCR)/agent:latest packages/agent
+	docker build --platform linux/amd64 -t $(GCR)/agent:latest packages/agent
 	docker push $(GCR)/agent:latest
 	gcloud run deploy $(API_SERVICE) \
 		--image $(GCR)/agent:latest \

@@ -16,7 +16,7 @@
  */
 
 import http from 'node:http';
-import { runCompileJob } from './agent.ts';
+import { runCompileJob, type CompileEvent } from './agent.ts';
 
 const PORT = Number(process.env.PORT ?? 8080);
 const API_URL = (process.env.VIBEHUB_API_URL ?? 'http://localhost:3000').replace(/\/$/, '');
@@ -45,7 +45,10 @@ async function pollOnce() {
   console.log(`[agent] picked up job ${job.id} for PR ${job.prId}`);
 
   try {
-    const proofs = await runCompileJob(pr?.intentDiff?.headFeatures ?? []);
+    const onProgress = (event: CompileEvent) => {
+      console.log(`[agent] [${job.id}] ${event.type}`, 'feature' in event ? event.feature : '');
+    };
+    const proofs = await runCompileJob(pr?.intentDiff?.headFeatures ?? [], onProgress);
     await fetch(`${API_URL}/api/agent/jobs/${job.id}`, {
       method: 'PATCH',
       headers: headers(),

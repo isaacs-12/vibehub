@@ -9,7 +9,7 @@
  *
  * Model selection:
  *   Set AGENT_MODEL env var to any Anthropic or Gemini model ID.
- *   - Gemini:    AGENT_MODEL=gemini-2.0-flash  (requires GOOGLE_API_KEY)
+ *   - Gemini:    AGENT_MODEL=gemini-2.5-flash  (requires GOOGLE_API_KEY)
  *   - Anthropic: AGENT_MODEL=claude-sonnet-4-6 (requires ANTHROPIC_API_KEY, default)
  */
 

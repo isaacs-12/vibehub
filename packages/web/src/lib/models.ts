@@ -16,8 +16,8 @@
 /** All supported model definitions. */
 export const MODEL_CATALOG = [
   // Google — free tier eligible
-  { id: 'gemini-2.0-flash-lite', name: 'Gemini 2.0 Flash Lite', provider: 'google' as const, tier: 'free' as const, description: 'Fast and cheap, great for simple projects' },
-  { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', provider: 'google' as const, tier: 'free' as const, description: 'Good balance of speed and quality' },
+  { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.0 Flash Lite', provider: 'google' as const, tier: 'free' as const, description: 'Fast and cheap, great for simple projects' },
+  { id: 'gemini-2.5-flash', name: 'Gemini 2.0 Flash', provider: 'google' as const, tier: 'free' as const, description: 'Good balance of speed and quality' },
   // Google — requires own key
   { id: 'gemini-2.5-flash-preview', name: 'Gemini 2.5 Flash', provider: 'google' as const, tier: 'byok' as const, description: 'Latest Gemini, strong reasoning' },
   { id: 'gemini-2.5-pro-preview', name: 'Gemini 2.5 Pro', provider: 'google' as const, tier: 'byok' as const, description: 'Top-tier Gemini model' },
@@ -33,10 +33,10 @@ export type ModelId = (typeof MODEL_CATALOG)[number]['id'];
 export type Provider = 'google' | 'anthropic' | 'openai';
 
 /** The model anonymous users get (cheapest possible). */
-export const ANONYMOUS_MODEL = 'gemini-2.0-flash-lite';
+export const ANONYMOUS_MODEL = 'gemini-2.5-flash-lite';
 
 /** The model logged-in users get by default (free tier). */
-export const DEFAULT_LOGGED_IN_MODEL = 'gemini-2.0-flash';
+export const DEFAULT_LOGGED_IN_MODEL = 'gemini-2.5-flash';
 
 /** Models available without a user-provided API key (platform-subsidized). */
 export const FREE_TIER_MODELS = MODEL_CATALOG.filter((m) => m.tier === 'free').map((m) => m.id);

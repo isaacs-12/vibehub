@@ -137,7 +137,7 @@ export const compilations = pgTable('compilations', {
 export const userModelPreferences = pgTable('user_model_preferences', {
   id: text('id').primaryKey(),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  preferredModel: text('preferred_model').notNull().default('gemini-2.0-flash-lite'), // model ID
+  preferredModel: text('preferred_model').notNull().default('gemini-2.5-flash-lite'), // model ID
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (table) => ({

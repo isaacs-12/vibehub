@@ -6,32 +6,7 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { requireAuth, isAuthError } from '@/lib/auth-middleware';
-
-// Simple symmetric encryption for API keys at rest.
-// In production, use a KMS (e.g., GCP KMS, AWS KMS) instead.
-function encrypt(text: string): string {
-  const secret = process.env.AUTH_SECRET || 'dev-secret-do-not-use-in-prod';
-  const key = crypto.createHash('sha256').update(secret).digest();
-  const iv = crypto.randomBytes(16);
-  const cipher = crypto.createCipheriv('aes-256-cbc', key, iv);
-  let encrypted = cipher.update(text, 'utf8', 'hex');
-  encrypted += cipher.final('hex');
-  return iv.toString('hex') + ':' + encrypted;
-}
-
-function decrypt(encrypted: string): string {
-  const secret = process.env.AUTH_SECRET || 'dev-secret-do-not-use-in-prod';
-  const key = crypto.createHash('sha256').update(secret).digest();
-  const [ivHex, encHex] = encrypted.split(':');
-  const iv = Buffer.from(ivHex, 'hex');
-  const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
-  let decrypted = decipher.update(encHex, 'hex', 'utf8');
-  decrypted += decipher.final('utf8');
-  return decrypted;
-}
-
-/** Exported for use by the model resolver when building compile jobs. */
-export { decrypt as decryptApiKey };
+import { encrypt } from '@/lib/crypto';
 
 const VALID_PROVIDERS = ['google', 'anthropic', 'openai'];
 

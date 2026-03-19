@@ -274,8 +274,8 @@ deploy-web: gcp-check
 		--cpu 1 \
 		--min-instances 0 \
 		--max-instances 2 \
-		--set-secrets="DATABASE_URL=DATABASE_URL:latest,GCS_BUCKET=GCS_BUCKET:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest" \
-		--set-env-vars="NODE_ENV=production"
+		--set-secrets="DATABASE_URL=DATABASE_URL:latest,GCS_BUCKET=GCS_BUCKET:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,GOOGLE_CLIENT_ID=GOOGLE_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest,AUTH_SECRET=AUTH_SECRET:latest" \
+		--set-env-vars="NODE_ENV=production,AUTH_URL=https://getvibehub.com"
 	@echo "  $(GREEN)✔ Web deployed to Cloud Run$(RESET)"
 
 # Build + deploy agent worker to Cloud Run
@@ -318,9 +318,12 @@ secrets-list:
 	@echo ""
 	@echo "  $(BOLD)Required GCP secrets for $(GCP_PROJECT):$(RESET)"
 	@echo ""
-	@echo "    $(CYAN)DATABASE_URL$(RESET)      Postgres connection string (Cloud SQL or external)"
-	@echo "    $(CYAN)GCS_BUCKET$(RESET)        GCS bucket name for artifact storage"
-	@echo "    $(CYAN)GEMINI_API_KEY$(RESET)     Google AI / Gemini API key for codegen"
+	@echo "    $(CYAN)DATABASE_URL$(RESET)          Postgres connection string (Cloud SQL or external)"
+	@echo "    $(CYAN)GCS_BUCKET$(RESET)            GCS bucket name for artifact storage"
+	@echo "    $(CYAN)GEMINI_API_KEY$(RESET)         Google AI / Gemini API key for codegen"
+	@echo "    $(CYAN)GOOGLE_CLIENT_ID$(RESET)       Google OAuth client ID"
+	@echo "    $(CYAN)GOOGLE_CLIENT_SECRET$(RESET)   Google OAuth client secret"
+	@echo "    $(CYAN)AUTH_SECRET$(RESET)            NextAuth session encryption key (openssl rand -base64 32)"
 	@echo ""
 	@echo "  Create them with: make secrets-create"
 	@echo "  Then set values:  gcloud secrets versions add SECRET_NAME --data-file=-"
@@ -328,7 +331,7 @@ secrets-list:
 
 # Create secret placeholders in Secret Manager (idempotent)
 secrets-create: gcp-check
-	@for secret in DATABASE_URL GCS_BUCKET GEMINI_API_KEY; do \
+	@for secret in DATABASE_URL GCS_BUCKET GEMINI_API_KEY GOOGLE_CLIENT_ID GOOGLE_CLIENT_SECRET AUTH_SECRET; do \
 		if gcloud secrets describe $$secret --project=$(GCP_PROJECT) >/dev/null 2>&1; then \
 			echo "  ○ $$secret already exists"; \
 		else \

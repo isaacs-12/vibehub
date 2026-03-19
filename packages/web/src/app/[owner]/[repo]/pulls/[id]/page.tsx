@@ -29,9 +29,9 @@ export default async function VibePRPage({ params }: Props) {
     <div className="mx-auto max-w-screen-xl px-4 py-8">
       {/* Breadcrumb */}
       <div className="text-sm text-fg-muted mb-4">
-        <Link href={`/${owner}/${repo}`} className="hover:text-fg">{owner}/{repo}</Link>
+        <Link href={`/${owner}/${repo}` as any} className="hover:text-fg">{owner}/{repo}</Link>
         {' / '}
-        <Link href={`/${owner}/${repo}/pulls`} className="hover:text-fg">Updates</Link>
+        <Link href={`/${owner}/${repo}/pulls` as any} className="hover:text-fg">Updates</Link>
         {' / '}
         <span className="text-fg">#{id.slice(0, 8)}</span>
       </div>

@@ -58,7 +58,7 @@ export default function FeatureMap({ features }: Props) {
             d3.HierarchyPointNode<FeatureNode>
           >()
           .angle((d) => (d as unknown as { x: number }).x)
-          .radius((d) => (d as unknown as { y: number }).y),
+          .radius((d) => (d as unknown as { y: number }).y) as any,
       );
 
     // Nodes

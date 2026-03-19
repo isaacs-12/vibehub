@@ -82,7 +82,7 @@ export default async function ProjectDashboard({ params }: Props) {
         <div className="mb-4 text-xs text-fg-muted flex items-center gap-1.5">
           <GitFork size={12} />
           Forked from{' '}
-          <Link href={`/${forkedFrom.owner}/${forkedFrom.repo}`} className="text-accent-emphasis hover:underline">
+          <Link href={`/${forkedFrom.owner}/${forkedFrom.repo}` as any} className="text-accent-emphasis hover:underline">
             {forkedFrom.owner}/{forkedFrom.repo}
           </Link>
         </div>

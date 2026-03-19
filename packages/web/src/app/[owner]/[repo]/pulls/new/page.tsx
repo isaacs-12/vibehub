@@ -54,9 +54,9 @@ export default function NewUpdatePage({ params }: Props) {
   return (
     <div className="mx-auto max-w-2xl px-4 py-12">
       <div className="mb-2 text-sm text-fg-muted">
-        <Link href={`/${owner}/${repo}`} className="hover:text-fg">{owner}/{repo}</Link>
+        <Link href={`/${owner}/${repo}` as any} className="hover:text-fg">{owner}/{repo}</Link>
         {' / '}
-        <Link href={`/${owner}/${repo}/pulls`} className="hover:text-fg">Updates</Link>
+        <Link href={`/${owner}/${repo}/pulls` as any} className="hover:text-fg">Updates</Link>
         {' / '}
         <span className="text-fg">New</span>
       </div>

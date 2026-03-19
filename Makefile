@@ -10,11 +10,22 @@ NPM        := npm
 DC         := docker compose
 DC_RUN     := $(DC) run --rm
 
+# ── GCP Config ────────────────────────────────────────────────────────────────
+GCP_PROJECT  := vibehub-490503
+GCP_REGION   := us-west1
+GCP_ACCOUNT  := isaacmckeesmith@gmail.com
+WEB_SERVICE  := vibehub
+API_SERVICE  := api
+GCR          := $(GCP_REGION)-docker.pkg.dev/$(GCP_PROJECT)/vibehub
+SA_EMAIL     := vibehub-backend@$(GCP_PROJECT).iam.gserviceaccount.com
+SQL_INSTANCE := $(GCP_PROJECT):$(GCP_REGION):vibehub-db
+
 # Colours
 BOLD  := \033[1m
 RESET := \033[0m
 GREEN := \033[0;32m
 CYAN  := \033[0;36m
+RED   := \033[0;31m
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 .PHONY: help
@@ -58,9 +69,15 @@ help:
 	@echo "    make vibe-compile   Codegen + typecheck + tests + AI requirements review"
 	@echo "    make vibe-check     Validate existing code only (no generation, safe for CI)"
 	@echo ""
-	@echo "  $(CYAN)S3 / LocalStack$(RESET)"
-	@echo "    make s3-ls          List vibehub-artifacts bucket contents"
-	@echo "    make s3-create      (Re-)create the bucket in LocalStack"
+	@echo "  $(CYAN)GCP / Production$(RESET)"
+	@echo "    make gcp             Login, set project, configure Docker auth"
+	@echo "    make gcp-check      Verify gcloud auth + project"
+	@echo "    make deploy-web     Build & deploy web to Cloud Run"
+	@echo "    make deploy-agent   Build & deploy agent to Cloud Run"
+	@echo "    make deploy-all     Deploy both web + agent"
+	@echo "    make db-migrate-prod  Run Drizzle push against prod DATABASE_URL"
+	@echo "    make secrets-list   List required GCP secrets"
+	@echo "    make secrets-create Create all secret placeholders in Secret Manager"
 	@echo ""
 	@echo "  $(CYAN)Quality$(RESET)"
 	@echo "    make lint           Run pre-commit on all files"
@@ -211,13 +228,116 @@ go-tidy:
 	@command -v go >/dev/null 2>&1 || { echo "  Go not found (install from https://go.dev/dl or skip go-tidy)."; exit 0; }
 	cd packages/cli && go mod tidy
 
-# ── S3 / LocalStack ───────────────────────────────────────────────────────────
-.PHONY: s3-ls s3-create
-s3-ls:
-	$(VENV)/bin/awslocal s3 ls s3://vibehub-artifacts --recursive
+# ── GCP / Production ─────────────────────────────────────────────────────────
+.PHONY: gcp gcp-check deploy-web deploy-agent deploy-all db-migrate-prod secrets-list secrets-create
 
-s3-create:
-	$(VENV)/bin/awslocal s3 mb s3://vibehub-artifacts --region us-east-1 || true
+# Login to the right GCP account + set project + configure Docker auth
+gcp:
+	gcloud auth login $(GCP_ACCOUNT)
+	gcloud config set project $(GCP_PROJECT)
+	gcloud auth configure-docker $(GCP_REGION)-docker.pkg.dev --quiet
+	@echo "  $(GREEN)✔ Logged in as $(GCP_ACCOUNT), project $(GCP_PROJECT), Docker auth configured$(RESET)"
+
+# Safety check: verify gcloud is authed as the right account + project
+gcp-check:
+	@echo "  Checking gcloud credentials…"
+	@ACTIVE_ACCOUNT=$$(gcloud auth list --filter=status:ACTIVE --format="value(account)" 2>/dev/null); \
+	if [ "$$ACTIVE_ACCOUNT" != "$(GCP_ACCOUNT)" ]; then \
+		echo "  $(RED)✘ Wrong gcloud account: $$ACTIVE_ACCOUNT$(RESET)"; \
+		echo "  Expected: $(GCP_ACCOUNT)"; \
+		echo "  Run: gcloud auth login $(GCP_ACCOUNT)"; \
+		exit 1; \
+	fi
+	@ACTIVE_PROJECT=$$(gcloud config get-value project 2>/dev/null); \
+	if [ "$$ACTIVE_PROJECT" != "$(GCP_PROJECT)" ]; then \
+		echo "  $(RED)✘ Wrong gcloud project: $$ACTIVE_PROJECT$(RESET)"; \
+		echo "  Expected: $(GCP_PROJECT)"; \
+		echo "  Run: gcloud config set project $(GCP_PROJECT)"; \
+		exit 1; \
+	fi
+	@echo "  $(GREEN)✔ gcloud: $(GCP_ACCOUNT) / $(GCP_PROJECT)$(RESET)"
+
+# Build + deploy web (Next.js) to Cloud Run
+deploy-web: gcp-check
+	@echo "  Building web image…"
+	docker build --platform linux/amd64 -f packages/web/Dockerfile.prod -t $(GCR)/web:latest .
+	docker push $(GCR)/web:latest
+	gcloud run deploy $(WEB_SERVICE) \
+		--image $(GCR)/web:latest \
+		--region $(GCP_REGION) \
+		--platform managed \
+		--allow-unauthenticated \
+		--port 3000 \
+		--service-account $(SA_EMAIL) \
+		--add-cloudsql-instances $(SQL_INSTANCE) \
+		--memory 512Mi \
+		--cpu 1 \
+		--min-instances 0 \
+		--max-instances 2 \
+		--set-secrets="DATABASE_URL=DATABASE_URL:latest,GCS_BUCKET=GCS_BUCKET:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest" \
+		--set-env-vars="NODE_ENV=production"
+	@echo "  $(GREEN)✔ Web deployed to Cloud Run$(RESET)"
+
+# Build + deploy agent worker to Cloud Run
+deploy-agent: gcp-check
+	@echo "  Building agent image…"
+	docker build -t $(GCR)/agent:latest packages/agent
+	docker push $(GCR)/agent:latest
+	gcloud run deploy $(API_SERVICE) \
+		--image $(GCR)/agent:latest \
+		--region $(GCP_REGION) \
+		--platform managed \
+		--no-allow-unauthenticated \
+		--service-account $(SA_EMAIL) \
+		--add-cloudsql-instances $(SQL_INSTANCE) \
+		--memory 512Mi \
+		--cpu 1 \
+		--min-instances 0 \
+		--max-instances 2 \
+		--set-secrets="DATABASE_URL=DATABASE_URL:latest,GCS_BUCKET=GCS_BUCKET:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest" \
+		--set-env-vars="NODE_ENV=production"
+	@echo "  $(GREEN)✔ Agent deployed to Cloud Run$(RESET)"
+
+deploy-all: deploy-web deploy-agent
+
+# Run Drizzle schema push against production database (via local Cloud SQL proxy)
+db-migrate-prod: gcp-check
+	@command -v cloud-sql-proxy >/dev/null 2>&1 || { echo "  $(RED)✘ cloud-sql-proxy not found$(RESET)"; echo "  Install: brew install cloud-sql-proxy"; exit 1; }
+	@lsof -ti:5499 | xargs kill -9 2>/dev/null; sleep 1; true
+	@echo "  Starting Cloud SQL proxy on :5499…"
+	@cloud-sql-proxy $(SQL_INSTANCE) --port 5499 & sleep 3
+	@echo "  Running Drizzle push…"
+	@DB_PASS=$$(gcloud secrets versions access latest --secret=DATABASE_PASSWORD --project=$(GCP_PROJECT) | python3 -c "import sys,urllib.parse;print(urllib.parse.quote(sys.stdin.read().strip(),safe=''))") && \
+	DATABASE_URL="postgresql://postgres:$$DB_PASS@localhost:5499/vibehub" $(NPM) run db:push --workspace=packages/web; \
+	EXIT_CODE=$$?; \
+	lsof -ti:5499 | xargs kill -9 2>/dev/null || true; \
+	exit $$EXIT_CODE
+
+# List all secrets needed in GCP Secret Manager
+secrets-list:
+	@echo ""
+	@echo "  $(BOLD)Required GCP secrets for $(GCP_PROJECT):$(RESET)"
+	@echo ""
+	@echo "    $(CYAN)DATABASE_URL$(RESET)      Postgres connection string (Cloud SQL or external)"
+	@echo "    $(CYAN)GCS_BUCKET$(RESET)        GCS bucket name for artifact storage"
+	@echo "    $(CYAN)GEMINI_API_KEY$(RESET)     Google AI / Gemini API key for codegen"
+	@echo ""
+	@echo "  Create them with: make secrets-create"
+	@echo "  Then set values:  gcloud secrets versions add SECRET_NAME --data-file=-"
+	@echo ""
+
+# Create secret placeholders in Secret Manager (idempotent)
+secrets-create: gcp-check
+	@for secret in DATABASE_URL GCS_BUCKET GEMINI_API_KEY; do \
+		if gcloud secrets describe $$secret --project=$(GCP_PROJECT) >/dev/null 2>&1; then \
+			echo "  ○ $$secret already exists"; \
+		else \
+			gcloud secrets create $$secret --project=$(GCP_PROJECT) --replication-policy=automatic; \
+			echo "  $(GREEN)✔ Created $$secret$(RESET)"; \
+		fi; \
+	done
+	@echo ""
+	@echo "  Now add values:  echo 'your-value' | gcloud secrets versions add SECRET_NAME --data-file=-"
 
 # ── Quality ───────────────────────────────────────────────────────────────────
 .PHONY: lint

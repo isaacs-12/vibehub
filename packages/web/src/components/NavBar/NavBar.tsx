@@ -46,7 +46,7 @@ export default function NavBar() {
 
 function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
   return (
-    <Link href={href} className="px-3 py-1.5 text-fg-muted hover:text-fg hover:bg-canvas-subtle rounded-md transition-colors">
+    <Link href={href as any} className="px-3 py-1.5 text-fg-muted hover:text-fg hover:bg-canvas-subtle rounded-md transition-colors">
       {children}
     </Link>
   );

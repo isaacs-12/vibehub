@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Zap, GitBranch, FolderPlus, Loader2, Check } from 'lucide-react';
+import { Zap, GitBranch, FolderPlus, Loader2, Check, Globe, Link as LinkIcon, Lock } from 'lucide-react';
 
 type Mode = 'blank' | 'import';
 
@@ -25,6 +25,7 @@ export default function NewProjectPage() {
   const [description, setDescription] = useState('');
   const [framework, setFramework] = useState<FrameworkId>('nextjs');
   const [repoUrl, setRepoUrl] = useState('');
+  const [visibility, setVisibility] = useState<'public' | 'unlisted' | 'private'>('public');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -49,6 +50,7 @@ export default function NewProjectPage() {
           owner: owner.trim(),
           repo: repo.trim(),
           description: fullDescription,
+          visibility,
           importUrl: mode === 'import' ? repoUrl.trim() : undefined,
         }),
       });
@@ -151,6 +153,38 @@ export default function NewProjectPage() {
                   {framework === f.id && <Check size={11} className="text-accent-emphasis shrink-0" />}
                 </div>
                 <div className="text-[11px] text-fg-subtle">{f.lang ? `${f.lang} · ` : ''}{f.desc}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Visibility */}
+        <div>
+          <label className="block text-xs text-fg-muted mb-2">Visibility</label>
+          <div className="grid grid-cols-3 gap-2">
+            {([
+              { id: 'public' as const, icon: <Globe size={14} />, label: 'Public', desc: 'Anyone can see this project' },
+              { id: 'unlisted' as const, icon: <LinkIcon size={14} />, label: 'Unlisted', desc: 'Only people with the link' },
+              { id: 'private' as const, icon: <Lock size={14} />, label: 'Private', desc: 'Only you can see it' },
+            ]).map((v) => (
+              <button
+                key={v.id}
+                type="button"
+                onClick={() => setVisibility(v.id)}
+                className={`text-left px-3 py-2.5 rounded-lg border transition-colors ${
+                  visibility === v.id
+                    ? 'border-accent bg-accent-subtle text-fg'
+                    : 'border-border hover:border-fg/20 text-fg-muted'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className={`flex items-center gap-1.5 text-xs font-medium ${visibility === v.id ? 'text-accent-emphasis' : ''}`}>
+                    {v.icon}
+                    {v.label}
+                  </span>
+                  {visibility === v.id && <Check size={11} className="text-accent-emphasis shrink-0" />}
+                </div>
+                <div className="text-[11px] text-fg-subtle">{v.desc}</div>
               </button>
             ))}
           </div>

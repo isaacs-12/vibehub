@@ -16,17 +16,18 @@
 /** All supported model definitions. */
 export const MODEL_CATALOG = [
   // Google — free tier eligible
-  { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.0 Flash Lite', provider: 'google' as const, tier: 'free' as const, description: 'Fast and cheap, great for simple projects' },
-  { id: 'gemini-2.5-flash', name: 'Gemini 2.0 Flash', provider: 'google' as const, tier: 'free' as const, description: 'Good balance of speed and quality' },
+  { id: 'gemini-2.5-flash-lite', name: 'Gemini 2.5 Flash Lite', provider: 'google' as const, tier: 'free' as const, description: 'Best for simple, single-purpose apps' },
+  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'google' as const, tier: 'free' as const, description: 'Best for standard apps with basic logic' },
   // Google — requires own key
-  { id: 'gemini-2.5-flash-preview', name: 'Gemini 2.5 Flash', provider: 'google' as const, tier: 'byok' as const, description: 'Latest Gemini, strong reasoning' },
-  { id: 'gemini-2.5-pro-preview', name: 'Gemini 2.5 Pro', provider: 'google' as const, tier: 'byok' as const, description: 'Top-tier Gemini model' },
+  { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash Preview', provider: 'google' as const, tier: 'byok' as const, description: 'Builds smart apps with advanced features' },
+  { id: 'gemini-3.1-flash-lite-preview', name: 'Gemini 3.1 Flash Lite Preview', provider: 'google' as const, tier: 'byok' as const, description: 'Fastest way to build functional prototypes' },
+  { id: 'gemini-3.1-pro-preview ', name: 'Gemini 3.1 Preview', provider: 'google' as const, tier: 'byok' as const, description: 'Builds complex, professional-grade systems' },
   // Anthropic — requires own key
-  { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', provider: 'anthropic' as const, tier: 'byok' as const, description: 'Fast, excellent code quality' },
-  { id: 'claude-opus-4-6', name: 'Claude Opus 4.6', provider: 'anthropic' as const, tier: 'byok' as const, description: 'Most capable, best for complex projects' },
+  { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6', provider: 'anthropic' as const, tier: 'byok' as const, description: 'Building polished, production-ready apps that look and feel professional' },
+  { id: 'claude-opus-4-6', name: 'Claude Opus 4.6', provider: 'anthropic' as const, tier: 'byok' as const, description: 'Massive, complex apps with deep logic and a high degree of creative nuance' },
   // OpenAI — requires own key
-  { id: 'gpt-4o', name: 'GPT-4o', provider: 'openai' as const, tier: 'byok' as const, description: 'OpenAI flagship' },
-  { id: 'o3-mini', name: 'o3-mini', provider: 'openai' as const, tier: 'byok' as const, description: 'OpenAI reasoning model' },
+  { id: 'gpt-4o', name: 'GPT-4o', provider: 'openai' as const, tier: 'byok' as const, description: 'Quick, versatile apps with great vision and UI design' },
+  { id: 'o3-mini', name: 'o3-mini', provider: 'openai' as const, tier: 'byok' as const, description: 'Heavy-duty, data-driven apps that require complex math or flawless logic' },
 ] as const;
 
 export type ModelId = (typeof MODEL_CATALOG)[number]['id'];

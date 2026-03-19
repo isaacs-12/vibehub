@@ -4,8 +4,8 @@ import './globals.css';
 import NavBar from '@/components/NavBar/NavBar';
 
 export const metadata: Metadata = {
-  title: 'Vibe Forge',
-  description: 'Vibe-first Git Forge — where features lead, code follows.',
+  title: 'VibeHub',
+  description: 'Vibe-first Version Control — where features lead, code follows.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

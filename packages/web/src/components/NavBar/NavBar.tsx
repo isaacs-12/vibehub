@@ -9,7 +9,7 @@ export default function NavBar() {
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2 text-accent-emphasis font-bold text-lg shrink-0">
           <Zap size={20} />
-          VibeForge
+          VibeHub
         </Link>
 
         {/* Search */}

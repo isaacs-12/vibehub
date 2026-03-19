@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { GitPullRequest, Settings, Plus, FolderOpen, Star, GitFork, Cpu, History, Check, Loader, X } from 'lucide-react';
 import { getStore } from '@/lib/data/store';
+import { auth } from '@/lib/auth';
 import CloneButton from '@/components/CloneButton/CloneButton';
 
 interface Props {
@@ -46,6 +47,9 @@ export default async function ProjectDashboard({ params }: Props) {
 
   const project = await store.getProject(owner, repo);
   if (!project) notFound();
+
+  const session = await auth();
+  const isOwner = (session as any)?.handle === owner;
 
   const [features, prs, family, snapshots] = await Promise.all([
     store.listFeatures(project.id),
@@ -91,14 +95,15 @@ export default async function ProjectDashboard({ params }: Props) {
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
-          <h1 className="text-xl font-semibold text-fg">
-            {project.description
-              ? project.description.replace(/^\[.*?\]\s*/, '')
-              : `${owner}/${repo}`}
-          </h1>
+          <h1 className="text-xl font-semibold text-fg">{owner}/{repo}</h1>
+          {project.description && (
+            <p className="text-sm text-fg-muted mt-0.5">{project.description}</p>
+          )}
           <div className="flex items-center gap-3 mt-1">
-            {project.description && (
-              <span className="text-xs text-fg-subtle font-mono">{owner}/{repo}</span>
+            {(project as any).framework && (
+              <span className="text-[10px] text-fg-muted flex items-center gap-1 bg-canvas-subtle border border-border rounded-full px-2 py-0.5">
+                {(project as any).framework}
+              </span>
             )}
             {project.compiledWith && (
               <span className="text-[10px] text-fg-muted flex items-center gap-1 bg-canvas-subtle border border-border rounded-full px-2 py-0.5">
@@ -134,13 +139,15 @@ export default async function ProjectDashboard({ params }: Props) {
               </span>
             )}
           </Link>
-          <Link
-            href={`/${owner}/${repo}/settings`}
-            className="flex items-center gap-1.5 px-3 py-1.5 border border-border text-sm rounded-md hover:bg-canvas-subtle transition-colors"
-          >
-            <Settings size={14} />
-            Settings
-          </Link>
+          {isOwner && (
+            <Link
+              href={`/${owner}/${repo}/settings`}
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-border text-sm rounded-md hover:bg-canvas-subtle transition-colors"
+            >
+              <Settings size={14} />
+              Settings
+            </Link>
+          )}
         </div>
       </div>
 

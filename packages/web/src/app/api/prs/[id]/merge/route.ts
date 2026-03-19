@@ -37,6 +37,11 @@ export async function POST(req: Request, { params }: Params) {
   const project = allProjects.find((p) => p.id === pr.projectId);
   if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 });
 
+  // Only the project owner can merge
+  if (project.owner !== authResult.handle) {
+    return NextResponse.json({ error: 'Only the project owner can merge updates' }, { status: 403 });
+  }
+
   const baseFeatures = pr.intentDiff?.baseFeatures ?? [];
   const headFeatures = pr.intentDiff?.headFeatures ?? [];
   const mainFeaturesRaw = await store.listFeatures(project.id);

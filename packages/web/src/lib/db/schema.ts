@@ -32,6 +32,7 @@ export const projects = pgTable('projects', {
   repo: text('repo').notNull(),
   description: text('description'),
   forkedFromId: text('forked_from_id'),
+  framework: text('framework'),               // nextjs | vite | express | fastapi | flask | null
   compiledWith: text('compiled_with'),        // model used for last compile (e.g. "claude-opus-4")
   visibility: text('visibility').notNull().default('public'), // public | unlisted | private
   starCount: integer('star_count').notNull().default(0),

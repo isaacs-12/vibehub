@@ -39,6 +39,18 @@ export async function PATCH(
   if (body.description !== undefined) {
     project.description = body.description;
   }
+  if (body.repo !== undefined) {
+    const newRepo = body.repo.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    if (!newRepo) {
+      return NextResponse.json({ error: 'Project name cannot be empty' }, { status: 400 });
+    }
+    // Check for conflicts
+    const existing = await store.getProject(owner, newRepo);
+    if (existing && existing.id !== project.id) {
+      return NextResponse.json({ error: `A project named "${newRepo}" already exists under your account` }, { status: 409 });
+    }
+    project.repo = newRepo;
+  }
 
   project.updatedAt = new Date().toISOString();
   await store.upsertProject(project);

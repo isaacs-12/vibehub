@@ -65,6 +65,9 @@ export async function POST(req: Request, { params }: Params) {
 }
 
 export async function PATCH(req: Request, { params }: Params) {
+  const authResult = await requireAuth(req);
+  if (isAuthError(authResult)) return authResult;
+
   const store = getStore();
   const project = await store.getProject(params.owner, params.repo);
   if (!project) return NextResponse.json({ error: 'Not found' }, { status: 404 });

@@ -31,6 +31,7 @@ export interface Project {
   owner: string;
   repo: string;
   description: string;
+  framework?: string | null;      // nextjs | vite | express | fastapi | flask
   forkedFromId?: string | null;   // project ID this was forked from
   compiledWith?: string | null;   // model used for last compile
   visibility: 'public' | 'unlisted' | 'private';
@@ -598,6 +599,7 @@ class PostgresStore implements Store {
     const { projects } = await this.schema();
     await db.insert(projects).values({
       id: p.id, owner: p.owner, repo: p.repo, description: p.description,
+      framework: p.framework ?? null,
       forkedFromId: p.forkedFromId ?? null, compiledWith: p.compiledWith ?? null,
       visibility: p.visibility ?? 'public', starCount: p.starCount ?? 0, forkCount: p.forkCount ?? 0,
       createdAt: new Date(p.createdAt), updatedAt: new Date(p.updatedAt),
@@ -605,6 +607,7 @@ class PostgresStore implements Store {
       target: projects.id,
       set: {
         description: p.description,
+        framework: p.framework ?? null,
         compiledWith: p.compiledWith ?? null,
         visibility: p.visibility ?? 'public',
         starCount: p.starCount ?? 0,

@@ -35,6 +35,7 @@ export async function POST(request: Request) {
       owner: user.handle,
       repo: repo.trim(),
       description: body.description?.trim() ?? '',
+      framework: body.framework ?? null,
       forkedFromId: body.forkedFromId ?? null,
       compiledWith: body.compiledWith ?? null,
       visibility: (body.visibility ?? 'public') as 'public' | 'unlisted' | 'private',

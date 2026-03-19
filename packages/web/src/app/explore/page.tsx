@@ -1,6 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
-import { Zap, GitFork, Search, Star, Cpu } from 'lucide-react';
+import { Zap, GitFork, Star, Cpu } from 'lucide-react';
 import { getStore } from '@/lib/data/store';
 
 export default async function ExplorePage() {
@@ -26,15 +26,6 @@ export default async function ExplorePage() {
           <Zap size={13} />
           New Project
         </Link>
-      </div>
-
-      {/* Search bar */}
-      <div className="flex items-center gap-2 bg-canvas-subtle border border-border rounded-md px-3 py-2 mb-6 max-w-md">
-        <Search size={14} className="text-fg-muted shrink-0" />
-        <input
-          placeholder="Search tools..."
-          className="flex-1 bg-transparent text-sm focus:outline-none placeholder:text-fg-subtle"
-        />
       </div>
 
       {/* Project grid */}

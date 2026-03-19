@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { GitPullRequest, GitMerge, MessageSquare, CheckCircle2, Code2, Loader2, XCircle } from 'lucide-react';
 import { getStore } from '@/lib/data/store';
+import { auth } from '@/lib/auth';
 import IntentDiff from '@/components/VibePR/IntentDiff';
 import ImplementationProofs from '@/components/VibePR/ImplementationProofs';
 import ReviewThread from '@/components/VibePR/ReviewThread';
@@ -18,6 +19,9 @@ export default async function VibePRPage({ params }: Props) {
 
   const project = await store.getProject(owner, repo);
   if (!project) notFound();
+
+  const session = await auth();
+  const isOwner = (session as any)?.handle === owner;
 
   const pr = await store.getPR(id);
   if (!pr || pr.projectId !== project.id) notFound();
@@ -56,7 +60,7 @@ export default async function VibePRPage({ params }: Props) {
             </span>
           </div>
         </div>
-        {pr.status === 'open' && (
+        {pr.status === 'open' && isOwner && (
           <MergeButton prId={pr.id} headBranch={pr.headBranch} />
         )}
         {pr.status === 'merged' && (

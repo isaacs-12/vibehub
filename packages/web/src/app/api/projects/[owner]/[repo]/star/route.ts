@@ -17,6 +17,11 @@ export async function POST(req: Request, { params }: Params) {
   const project = await store.getProject(params.owner, params.repo);
   if (!project) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
+  // Can't star your own project
+  if (project.owner === user.handle) {
+    return NextResponse.json({ error: 'You cannot star your own project' }, { status: 400 });
+  }
+
   const starred = await store.isStarred(project.id, user.id);
   if (starred) {
     await store.unstarProject(project.id, user.id);

@@ -5,6 +5,7 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getStore } from '@/lib/data/store';
+import { requireAuth, isAuthError } from '@/lib/auth-middleware';
 
 interface Params { params: { owner: string; repo: string } }
 
@@ -27,9 +28,16 @@ export async function GET(_req: Request, { params }: Params) {
 }
 
 export async function POST(req: Request, { params }: Params) {
+  const authResult = await requireAuth(req);
+  if (isAuthError(authResult)) return authResult;
+
   const store = getStore();
   const project = await store.getProject(params.owner, params.repo);
   if (!project) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
+  if (project.owner !== authResult.handle) {
+    return NextResponse.json({ error: 'Only the project owner can create snapshots' }, { status: 403 });
+  }
 
   const body = await req.json();
   if (!body.features || !Array.isArray(body.features)) {

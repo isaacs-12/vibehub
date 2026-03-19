@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useSession, signIn, signOut } from 'next-auth/react';
-import { Zap, Search, Bell, Settings, LogOut, User } from 'lucide-react';
+import { Zap, Settings, LogOut, User } from 'lucide-react';
 
 export default function NavBar() {
   const { data: session, status } = useSession();
@@ -19,14 +19,7 @@ export default function NavBar() {
           VibeHub
         </Link>
 
-        {/* Search */}
-        <div className="flex-1 max-w-sm">
-          <div className="flex items-center gap-2 bg-canvas-subtle border border-border rounded-md px-3 py-1.5 text-sm text-fg-muted hover:border-accent/50 transition-colors cursor-text">
-            <Search size={13} />
-            <span>Search features, decisions…</span>
-            <kbd className="ml-auto text-xs bg-canvas border border-border rounded px-1.5">/</kbd>
-          </div>
-        </div>
+        <div className="flex-1" />
 
         {/* Nav links */}
         <div className="hidden md:flex items-center gap-1 text-sm">
@@ -40,9 +33,6 @@ export default function NavBar() {
             <div className="w-8 h-8 rounded-full bg-canvas-subtle animate-pulse" />
           ) : user ? (
             <>
-              <button className="p-2 text-fg-muted hover:text-fg rounded-md hover:bg-canvas-subtle transition-colors">
-                <Bell size={16} />
-              </button>
               <Link href={"/settings" as any} className="p-2 text-fg-muted hover:text-fg rounded-md hover:bg-canvas-subtle transition-colors">
                 <Settings size={16} />
               </Link>

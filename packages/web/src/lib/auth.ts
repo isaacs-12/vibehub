@@ -102,6 +102,9 @@ const nextAuth: NextAuthResult = NextAuth({
         (session as any).userId = token.userId;
         (session as any).handle = token.handle;
         (session as any).avatarUrl = token.avatarUrl;
+        if (token.avatarUrl && session.user) {
+          session.user.image = token.avatarUrl as string;
+        }
       }
       return session;
     },

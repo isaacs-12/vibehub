@@ -30,6 +30,11 @@
     "icon": []
   },
   "plugins": {
-    "dialog": null
+    "dialog": null,
+    "deep-link": {
+      "desktop": {
+        "schemes": ["vibehub"]
+      }
+    }
   }
 }

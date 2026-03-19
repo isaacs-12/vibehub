@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 import { ArrowRight, Loader2, Sparkles } from 'lucide-react';
 
 interface Project {
@@ -15,6 +16,7 @@ interface Project {
 
 export default function HomePage() {
   const router = useRouter();
+  const { data: session } = useSession();
   const [prompt, setPrompt] = useState('');
   const [creating, setCreating] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -42,15 +44,15 @@ export default function HomePage() {
         .replace(/-+/g, '-')
         .replace(/^-|-$/g, '')
         .slice(0, 50) || 'my-project';
-    const owner = 'my';
+    const handle = (session as any)?.handle ?? 'my';
 
     try {
       await fetch('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ owner, repo, description: prompt.trim() }),
+        body: JSON.stringify({ repo, description: prompt.trim() }),
       });
-      router.push(`/${owner}/${repo}`);
+      router.push(`/${handle}/${repo}`);
     } catch {
       setCreating(false);
     }

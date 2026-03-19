@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getStore } from '@/lib/data/store';
+import { requireAuth, isAuthError } from '@/lib/auth-middleware';
 
 export async function GET() {
   try {
@@ -18,16 +19,21 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    const authResult = await requireAuth(request);
+    if (isAuthError(authResult)) return authResult;
+    const user = authResult;
+
     const body = await request.json().catch(() => null);
-    if (!body?.owner || !body?.repo) {
-      return NextResponse.json({ error: 'owner and repo are required' }, { status: 400 });
+    const repo = body?.repo;
+    if (!repo) {
+      return NextResponse.json({ error: 'repo is required' }, { status: 400 });
     }
 
     const now = new Date().toISOString();
     const project = {
       id: crypto.randomUUID(),
-      owner: body.owner.trim(),
-      repo: body.repo.trim(),
+      owner: user.handle,
+      repo: repo.trim(),
       description: body.description?.trim() ?? '',
       forkedFromId: body.forkedFromId ?? null,
       compiledWith: body.compiledWith ?? null,
@@ -61,7 +67,7 @@ export async function POST(request: Request) {
         version: 0,
         features,
         message: 'Initial import',
-        author: body.owner,
+        author: user.handle,
         parentSnapshotId: null,
         forkedFromSnapshotId: null,
         createdAt: now,

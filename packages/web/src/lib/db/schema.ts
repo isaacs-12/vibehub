@@ -1,4 +1,30 @@
-import { pgTable, text, timestamp, integer, jsonb } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, integer, jsonb, uniqueIndex } from 'drizzle-orm/pg-core';
+
+// ─── Users & Auth ────────────────────────────────────────────────────────────
+
+export const users = pgTable('users', {
+  id: text('id').primaryKey(),                           // UUID
+  googleId: text('google_id').notNull(),                 // Google OAuth subject
+  email: text('email').notNull(),
+  name: text('name'),
+  avatarUrl: text('avatar_url'),
+  handle: text('handle').notNull(),                      // URL-friendly username (unique)
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => ({
+  googleIdIdx: uniqueIndex('users_google_id_idx').on(table.googleId),
+  emailIdx: uniqueIndex('users_email_idx').on(table.email),
+  handleIdx: uniqueIndex('users_handle_idx').on(table.handle),
+}));
+
+export const sessions = pgTable('sessions', {
+  id: text('id').primaryKey(),                           // secure random token
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  expiresAt: timestamp('expires_at').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// ─── Projects ────────────────────────────────────────────────────────────────
 
 export const projects = pgTable('projects', {
   id: text('id').primaryKey(),
@@ -101,10 +127,51 @@ export const compilations = pgTable('compilations', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
-export const providerSettings = pgTable('provider_settings', {
+// ─── User model preferences & API keys ───────────────────────────────────────
+
+/**
+ * Per-user model preferences.
+ * Determines which model/provider is used for compilation.
+ * Anonymous users fall back to the platform's cheapest free-tier model.
+ */
+export const userModelPreferences = pgTable('user_model_preferences', {
   id: text('id').primaryKey(),
-  projectId: text('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),
-  provider: text('provider').notNull(), // gemini-flash | claude-sonnet | gpt-4o | local-ollama
-  encryptedApiKey: text('encrypted_api_key'),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  preferredModel: text('preferred_model').notNull().default('gemini-2.0-flash-lite'), // model ID
+  createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => ({
+  userIdx: uniqueIndex('user_model_prefs_user_idx').on(table.userId),
+}));
+
+/**
+ * Per-user API keys for external providers.
+ * Encrypted at rest. Users can bring their own keys to unlock more powerful models.
+ * Future: platform-managed billing replaces this for users who don't have their own keys.
+ */
+export const userApiKeys = pgTable('user_api_keys', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  provider: text('provider').notNull(),               // 'anthropic' | 'google' | 'openai'
+  encryptedApiKey: text('encrypted_api_key').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => ({
+  userProviderIdx: uniqueIndex('user_api_keys_user_provider_idx').on(table.userId, table.provider),
+}));
+
+/**
+ * Usage tracking — records per-user model usage for future billing.
+ * Even before billing is live, this gives us the data to build on.
+ */
+export const usageRecords = pgTable('usage_records', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').references(() => users.id, { onDelete: 'set null' }), // null = anonymous
+  projectId: text('project_id').references(() => projects.id, { onDelete: 'set null' }),
+  model: text('model').notNull(),
+  provider: text('provider').notNull(),               // 'anthropic' | 'google' | 'openai' | 'platform'
+  keySource: text('key_source').notNull(),             // 'user' | 'platform' — whose key was used
+  inputTokens: integer('input_tokens'),
+  outputTokens: integer('output_tokens'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
 });

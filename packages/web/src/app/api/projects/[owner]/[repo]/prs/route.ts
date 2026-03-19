@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getStore } from '@/lib/data/store';
 import type { CompileJob } from '@/lib/data/store';
+import { requireAuth, isAuthError } from '@/lib/auth-middleware';
+import { resolveCompileModel } from '@/lib/resolve-compile-model';
 
 interface Params { params: { owner: string; repo: string } }
 
@@ -13,6 +15,10 @@ export async function GET(_req: Request, { params }: Params) {
 }
 
 export async function POST(request: Request, { params }: Params) {
+  const authResult = await requireAuth(request);
+  if (isAuthError(authResult)) return authResult;
+  const user = authResult;
+
   const project = await getStore().getProject(params.owner, params.repo);
   if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 });
 
@@ -37,7 +43,7 @@ export async function POST(request: Request, { params }: Params) {
     id: crypto.randomUUID(),
     projectId: project.id,
     title: body.title,
-    author: body.author ?? 'anonymous',
+    author: user.handle,
     status: 'open' as const,
     headBranch,
     decisionsChanged: body.decisionsChanged ?? features.length,
@@ -59,7 +65,6 @@ export async function POST(request: Request, { params }: Params) {
     if (currentFeatures.length > 0) {
       const latestSnapshot = await store.getLatestSnapshot(project.id);
       if (!latestSnapshot) {
-        // No snapshot exists yet — create one to represent the base state
         await store.createSnapshot({
           id: crypto.randomUUID(),
           projectId: project.id,
@@ -74,8 +79,21 @@ export async function POST(request: Request, { params }: Params) {
     }
   }
 
+  // Resolve which model/key to use based on the user's preferences
+  const resolved = await resolveCompileModel(user.id);
+
   // Enqueue a cloud compile job so the agent can produce robust implementation proofs.
-  const job: CompileJob = { id: crypto.randomUUID(), prId: pr.id, status: 'pending', createdAt: now };
+  const job: CompileJob = {
+    id: crypto.randomUUID(),
+    prId: pr.id,
+    status: 'pending',
+    model: resolved.model,
+    provider: resolved.provider,
+    keySource: resolved.keySource,
+    apiKey: resolved.apiKey,
+    userId: user.id,
+    createdAt: now,
+  };
   await store.createCompileJob(job);
 
   return NextResponse.json(pr, { status: 201 });

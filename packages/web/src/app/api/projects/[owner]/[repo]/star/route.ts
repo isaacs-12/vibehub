@@ -1,30 +1,30 @@
 /**
- * POST /api/projects/[owner]/[repo]/star   — toggle star
+ * POST /api/projects/[owner]/[repo]/star   — toggle star (auth required)
  * GET  /api/projects/[owner]/[repo]/star   — check if starred
- *
- * Body: { userId: string }
  */
 import { NextResponse } from 'next/server';
 import { getStore } from '@/lib/data/store';
+import { requireAuth, isAuthError, getAuthUser } from '@/lib/auth-middleware';
 
 interface Params { params: { owner: string; repo: string } }
 
 export async function POST(req: Request, { params }: Params) {
+  const authResult = await requireAuth(req);
+  if (isAuthError(authResult)) return authResult;
+  const user = authResult;
+
   const store = getStore();
   const project = await store.getProject(params.owner, params.repo);
   if (!project) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  const { userId } = await req.json();
-  if (!userId) return NextResponse.json({ error: 'userId required' }, { status: 400 });
-
-  const starred = await store.isStarred(project.id, userId);
+  const starred = await store.isStarred(project.id, user.id);
   if (starred) {
-    await store.unstarProject(project.id, userId);
+    await store.unstarProject(project.id, user.id);
   } else {
     await store.starProject({
-      id: `star-${project.id}-${userId}`,
+      id: `star-${project.id}-${user.id}`,
       projectId: project.id,
-      userId,
+      userId: user.id,
       createdAt: new Date().toISOString(),
     });
   }
@@ -39,9 +39,8 @@ export async function GET(req: Request, { params }: Params) {
   const project = await store.getProject(params.owner, params.repo);
   if (!project) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-  const url = new URL(req.url);
-  const userId = url.searchParams.get('userId');
-  const starred = userId ? await store.isStarred(project.id, userId) : false;
+  const user = await getAuthUser(req);
+  const starred = user ? await store.isStarred(project.id, user.id) : false;
 
   return NextResponse.json({ starred, starCount: project.starCount });
 }

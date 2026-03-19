@@ -16,10 +16,15 @@ import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getStore } from '@/lib/data/store';
 import { detectConflicts, computeMergedVibes, changedFiles } from '@/lib/vibe-merge';
+import { requireAuth, isAuthError } from '@/lib/auth-middleware';
+import { resolveCompileModel } from '@/lib/resolve-compile-model';
 
 interface Params { params: { id: string } }
 
 export async function POST(req: Request, { params }: Params) {
+  const authResult = await requireAuth(req);
+  if (isAuthError(authResult)) return authResult;
+
   const store = getStore();
   const pr = await store.getPR(params.id);
   if (!pr) return NextResponse.json({ error: 'PR not found' }, { status: 404 });
@@ -109,10 +114,16 @@ export async function POST(req: Request, { params }: Params) {
   // Enqueue compile job scoped to the changed files only
   const oldMain = mainFeatures;
   const filesToRecompile = changedFiles(oldMain, merged);
+  const resolved = await resolveCompileModel(authResult.id);
   await store.createCompileJob({
     id: crypto.randomUUID(),
     prId: pr.id,
     status: 'pending',
+    model: resolved.model,
+    provider: resolved.provider,
+    keySource: resolved.keySource,
+    apiKey: resolved.apiKey,
+    userId: authResult.id,
     createdAt: now,
   });
 

@@ -11,6 +11,19 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
+// ─── User types ──────────────────────────────────────────────────────────────
+
+export interface User {
+  id: string;
+  googleId: string;
+  email: string;
+  name: string | null;
+  avatarUrl: string | null;
+  handle: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ─── Shared types ─────────────────────────────────────────────────────────────
 
 export interface Project {
@@ -114,6 +127,16 @@ export interface CompileJob {
   prId: string;
   /** 'pending' = waiting to be picked up; 'running' = agent is working; 'completed' / 'failed' = done. */
   status: 'pending' | 'running' | 'completed' | 'failed';
+  /** The model the agent should use for this job. */
+  model?: string;
+  /** The provider for the model ('google' | 'anthropic' | 'openai'). */
+  provider?: string;
+  /** Encrypted API key — only set when using a user-provided key. The agent decrypts server-side. */
+  apiKey?: string;
+  /** 'platform' or 'user' — tracks whose key was used, for billing. */
+  keySource?: string;
+  /** The user who triggered this job (null for anonymous). */
+  userId?: string | null;
   createdAt: string;
   startedAt?: string;
   completedAt?: string;
@@ -123,6 +146,10 @@ export interface CompileJob {
 // ─── Store interface ──────────────────────────────────────────────────────────
 
 export interface Store {
+  // Users
+  getUserByHandle(handle: string): Promise<User | null>;
+  listUserProjects(handle: string): Promise<Project[]>;
+
   // Projects
   getProject(owner: string, repo: string): Promise<Project | null>;
   listProjects(): Promise<Project[]>;
@@ -220,6 +247,11 @@ function writeFile(data: FileData): void {
 }
 
 class FileStore implements Store {
+  async getUserByHandle(_handle: string): Promise<User | null> { return null; }
+  async listUserProjects(handle: string): Promise<Project[]> {
+    return readFile().projects.filter((p) => p.owner === handle);
+  }
+
   async getProject(owner: string, repo: string): Promise<Project | null> {
     return readFile().projects.find(
       (p) => p.owner === owner && p.repo === repo,
@@ -521,6 +553,23 @@ class PostgresStore implements Store {
 
   private async schema() {
     return import('../db/schema');
+  }
+
+  async getUserByHandle(handle: string): Promise<User | null> {
+    const { eq } = await import('drizzle-orm');
+    const db = await this.db();
+    const { users } = await this.schema();
+    const [row] = await db.select().from(users).where(eq(users.handle, handle)).limit(1);
+    if (!row) return null;
+    return { ...row, name: row.name ?? null, avatarUrl: row.avatarUrl ?? null, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
+  }
+
+  async listUserProjects(handle: string): Promise<Project[]> {
+    const { eq } = await import('drizzle-orm');
+    const db = await this.db();
+    const { projects } = await this.schema();
+    const rows = await db.select().from(projects).where(eq(projects.owner, handle));
+    return rows.map((r) => ({ ...r, description: r.description ?? '', visibility: (r.visibility ?? 'public') as Project['visibility'], starCount: r.starCount ?? 0, forkCount: r.forkCount ?? 0, createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString() }));
   }
 
   async getProject(owner: string, repo: string): Promise<Project | null> {

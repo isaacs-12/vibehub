@@ -13,7 +13,12 @@ export async function GET(req: Request) {
   const user = authResult;
 
   if (!process.env.DATABASE_URL) {
-    return NextResponse.json({ preferredModel: DEFAULT_LOGGED_IN_MODEL, hasApiKeys: {} });
+    return NextResponse.json({
+      preferredModel: DEFAULT_LOGGED_IN_MODEL,
+      preferredFastModel: null,
+      hasApiKeys: {},
+      availableModels: MODEL_CATALOG.map((m) => ({ ...m, available: m.tier === 'free' })),
+    });
   }
 
   const { db } = await import('@/lib/db/client');
@@ -28,6 +33,7 @@ export async function GET(req: Request) {
 
   return NextResponse.json({
     preferredModel: prefs?.preferredModel ?? DEFAULT_LOGGED_IN_MODEL,
+    preferredFastModel: prefs?.preferredFastModel ?? null,
     hasApiKeys,
     availableModels: MODEL_CATALOG.map((m) => ({
       ...m,
@@ -51,8 +57,17 @@ export async function PUT(req: Request) {
     return NextResponse.json({ error: 'Unknown model' }, { status: 400 });
   }
 
+  // Validate fast model if provided (null = "same as generation model")
+  const fastModelId: string | null = body.preferredFastModel ?? null;
+  if (fastModelId !== null) {
+    const fastModel = MODEL_CATALOG.find((m) => m.id === fastModelId);
+    if (!fastModel) {
+      return NextResponse.json({ error: 'Unknown fast model' }, { status: 400 });
+    }
+  }
+
   if (!process.env.DATABASE_URL) {
-    return NextResponse.json({ ok: true, preferredModel: body.preferredModel });
+    return NextResponse.json({ ok: true, preferredModel: body.preferredModel, preferredFastModel: fastModelId });
   }
 
   const { db } = await import('@/lib/db/client');
@@ -62,12 +77,13 @@ export async function PUT(req: Request) {
     id: crypto.randomUUID(),
     userId: user.id,
     preferredModel: body.preferredModel,
+    preferredFastModel: fastModelId,
     createdAt: new Date(),
     updatedAt: new Date(),
   }).onConflictDoUpdate({
     target: userModelPreferences.userId,
-    set: { preferredModel: body.preferredModel, updatedAt: new Date() },
+    set: { preferredModel: body.preferredModel, preferredFastModel: fastModelId, updatedAt: new Date() },
   });
 
-  return NextResponse.json({ ok: true, preferredModel: body.preferredModel });
+  return NextResponse.json({ ok: true, preferredModel: body.preferredModel, preferredFastModel: fastModelId });
 }

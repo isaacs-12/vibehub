@@ -65,6 +65,11 @@ export interface ResolvedModel {
   apiKey: string;
 }
 
+export interface ResolvedModelPair {
+  generation: ResolvedModel;
+  validation: ResolvedModel;
+}
+
 /**
  * Resolve which model and API key to use for a given context.
  *
@@ -111,6 +116,25 @@ export function resolveModel(
   // Free tier model — use platform key
   const platformKey = getPlatformKey(provider);
   return { modelId, provider, keySource: 'platform', apiKey: platformKey };
+}
+
+/**
+ * Resolve both the generation and validation models for a user.
+ *
+ * @param preferredFastModel - null means "same as generation model"
+ */
+export function resolveModelPair(
+  userId: string | null,
+  preferredModel: string | null,
+  preferredFastModel: string | null,
+  userApiKeys: Partial<Record<Provider, string>>,
+): ResolvedModelPair {
+  const generation = resolveModel(userId, preferredModel, userApiKeys);
+  if (!preferredFastModel) {
+    return { generation, validation: generation };
+  }
+  const validation = resolveModel(userId, preferredFastModel, userApiKeys);
+  return { generation, validation };
 }
 
 function getPlatformKey(provider: Provider): string {

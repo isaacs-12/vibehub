@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/db/client';
-import { features } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import crypto from 'crypto';
+import { getStore } from '@/lib/data/store';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -9,22 +8,55 @@ export async function GET(request: Request) {
   if (!projectId) {
     return NextResponse.json({ error: 'projectId required' }, { status: 400 });
   }
-  const rows = await db.select().from(features).where(eq(features.projectId, projectId));
-  return NextResponse.json(rows);
+  try {
+    const features = await getStore().listFeatures(projectId);
+    return NextResponse.json(features);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }
 
 export async function POST(request: Request) {
-  const body = await request.json();
-  const { id, projectId, name, slug, content } = body;
-  if (!id || !projectId || !name || !content) {
-    return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
-  }
-  await db
-    .insert(features)
-    .values({ id, projectId, name, slug: slug ?? name.toLowerCase().replace(/\s+/g, '-'), content })
-    .onConflictDoUpdate({
-      target: features.id,
-      set: { content, name, updatedAt: new Date() },
+  try {
+    const body = await request.json();
+    const { id, projectId, name, slug, content } = body;
+    if (!id || !projectId || !name || !content) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    }
+
+    const store = getStore();
+    const now = new Date().toISOString();
+    const featureSlug = slug ?? name.toLowerCase().replace(/\s+/g, '-');
+
+    await store.upsertFeature({
+      id,
+      projectId,
+      name,
+      slug: featureSlug,
+      content,
+      createdAt: now,
+      updatedAt: now,
     });
-  return NextResponse.json({ ok: true });
+
+    // Create a snapshot capturing the new state of all features
+    const allFeatures = await store.listFeatures(projectId);
+    const latestSnapshot = await store.getLatestSnapshot(projectId);
+    await store.createSnapshot({
+      id: crypto.randomUUID(),
+      projectId,
+      version: 0, // auto-assigned
+      features: allFeatures.map((f) => ({ slug: f.slug, content: f.content })),
+      message: `Updated feature: ${name}`,
+      author: body.author,
+      parentSnapshotId: latestSnapshot?.id ?? null,
+      forkedFromSnapshotId: null,
+      createdAt: now,
+    });
+
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }

@@ -1,0 +1,43 @@
+# ── Build stage ───────────────────────────────────────────────────────────────
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Install deps (cached layer)
+COPY package.json package-lock.json* ./
+COPY packages/web/package.json ./packages/web/
+RUN npm install --workspace=packages/web
+
+# Copy config
+COPY tsconfig.base.json ./
+COPY packages/web/tsconfig.json ./packages/web/
+COPY packages/web/next.config.js ./packages/web/
+COPY packages/web/tailwind.config.ts ./packages/web/
+COPY packages/web/postcss.config.js ./packages/web/
+COPY packages/web/drizzle.config.ts ./packages/web/
+
+# Copy source and build
+COPY packages/web/src ./packages/web/src
+COPY packages/web/public ./packages/web/public
+
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN npm run build --workspace=packages/web
+
+# ── Runtime stage ─────────────────────────────────────────────────────────────
+FROM node:20-alpine AS runner
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# Copy only what's needed to run
+COPY --from=builder /app/packages/web/.next/standalone ./
+COPY --from=builder /app/packages/web/.next/static ./packages/web/.next/static
+COPY --from=builder /app/packages/web/public ./packages/web/public
+
+EXPOSE 3000
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
+
+CMD ["node", "packages/web/server.js"]

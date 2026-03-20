@@ -25,12 +25,16 @@ var importCmd = &cobra.Command{
 			return fmt.Errorf("Gemini API key required (--api-key or GEMINI_API_KEY env var)")
 		}
 
-		color.Cyan("Scanning repository at %s…", importRepo)
+		color.Cyan("Importing repository at %s…\n", importRepo)
 
 		v := viber.New(apiKey)
 		p := project.New(importRepo)
 
-		snapshot, err := v.Extract(cmd.Context(), importRepo)
+		log := func(msg string) {
+			color.Cyan("  %s", msg)
+		}
+
+		snapshot, err := v.Extract(cmd.Context(), importRepo, log)
 		if err != nil {
 			return fmt.Errorf("extraction failed: %w", err)
 		}
@@ -39,7 +43,7 @@ var importCmd = &cobra.Command{
 			return fmt.Errorf("writing vibes: %w", err)
 		}
 
-		color.Green("✔ Vibes extracted and written to %s/.vibe/", importRepo)
+		color.Green("\n✔ %d features extracted and written to %s/.vibe/", len(snapshot.Features), importRepo)
 		return nil
 	},
 }

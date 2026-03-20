@@ -11,6 +11,19 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
+// ─── User types ──────────────────────────────────────────────────────────────
+
+export interface User {
+  id: string;
+  googleId: string;
+  email: string;
+  name: string | null;
+  avatarUrl: string | null;
+  handle: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ─── Shared types ─────────────────────────────────────────────────────────────
 
 export interface Project {
@@ -18,8 +31,28 @@ export interface Project {
   owner: string;
   repo: string;
   description: string;
+  framework?: string | null;      // nextjs | vite | express | fastapi | flask
+  forkedFromId?: string | null;   // project ID this was forked from
+  compiledWith?: string | null;   // model used for last compile
+  visibility: 'public' | 'unlisted' | 'private';
+  starCount: number;
+  forkCount: number;
   createdAt: string;   // ISO
   updatedAt: string;
+}
+
+export interface Star {
+  id: string;
+  projectId: string;
+  userId: string;
+  createdAt: string;
+}
+
+/** A project and all its related forks (the "family"). */
+export interface ProjectFamily {
+  root: Project;
+  variants: Project[];          // all forks (direct + transitive), sorted by starCount desc
+  totalStars: number;           // rollup across entire family
 }
 
 export interface Feature {
@@ -61,12 +94,50 @@ export interface PRComment {
   createdAt: string;
 }
 
+/** An immutable point-in-time capture of all feature specs. */
+export interface SpecSnapshot {
+  id: string;
+  projectId: string;
+  version: number;                                    // auto-incrementing per project
+  features: { slug: string; content: string }[];      // full spec content at this point
+  message?: string;                                   // "Merged PR: Add auth feature"
+  author?: string;
+  prId?: string;                                      // PR that triggered this snapshot
+  parentSnapshotId?: string | null;                   // previous snapshot in project history
+  forkedFromSnapshotId?: string | null;               // snapshot from another project (fork source)
+  createdAt: string;
+}
+
+/** A record of compiling a specific snapshot with a specific model. */
+export interface Compilation {
+  id: string;
+  snapshotId: string;
+  projectId: string;
+  model: string;                                      // "claude-opus-4", "gemini-2.5-flash", etc.
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  code?: { path: string; content: string }[] | null;  // generated files
+  error?: string;
+  startedAt?: string;
+  completedAt?: string;
+  createdAt: string;
+}
+
 /** A cloud compile job enqueued when a PR is pushed or merged. */
 export interface CompileJob {
   id: string;
   prId: string;
   /** 'pending' = waiting to be picked up; 'running' = agent is working; 'completed' / 'failed' = done. */
   status: 'pending' | 'running' | 'completed' | 'failed';
+  /** The model the agent should use for this job. */
+  model?: string;
+  /** The provider for the model ('google' | 'anthropic' | 'openai'). */
+  provider?: string;
+  /** Encrypted API key — only set when using a user-provided key. The agent decrypts server-side. */
+  apiKey?: string;
+  /** 'platform' or 'user' — tracks whose key was used, for billing. */
+  keySource?: string;
+  /** The user who triggered this job (null for anonymous). */
+  userId?: string | null;
   createdAt: string;
   startedAt?: string;
   completedAt?: string;
@@ -76,6 +147,10 @@ export interface CompileJob {
 // ─── Store interface ──────────────────────────────────────────────────────────
 
 export interface Store {
+  // Users
+  getUserByHandle(handle: string): Promise<User | null>;
+  listUserProjects(handle: string): Promise<Project[]>;
+
   // Projects
   getProject(owner: string, repo: string): Promise<Project | null>;
   listProjects(): Promise<Project[]>;
@@ -94,6 +169,23 @@ export interface Store {
   listComments(prId: string): Promise<PRComment[]>;
   addComment(c: PRComment): Promise<void>;
 
+  // Spec snapshots & compilations
+  createSnapshot(snapshot: SpecSnapshot): Promise<SpecSnapshot>;
+  listSnapshots(projectId: string): Promise<SpecSnapshot[]>;
+  getSnapshot(id: string): Promise<SpecSnapshot | null>;
+  getLatestSnapshot(projectId: string): Promise<SpecSnapshot | null>;
+  createCompilation(compilation: Compilation): Promise<void>;
+  listCompilations(snapshotId: string): Promise<Compilation[]>;
+  listProjectCompilations(projectId: string): Promise<Compilation[]>;
+  updateCompilation(id: string, updates: Partial<Pick<Compilation, 'status' | 'code' | 'error' | 'startedAt' | 'completedAt'>>): Promise<void>;
+
+  // Stars & Lineage
+  starProject(star: Star): Promise<void>;
+  unstarProject(projectId: string, userId: string): Promise<void>;
+  isStarred(projectId: string, userId: string): Promise<boolean>;
+  getProjectFamily(projectId: string): Promise<ProjectFamily | null>;
+  forkProject(sourceId: string, newOwner: string, newRepo: string): Promise<Project>;
+
   // Compile jobs (cloud agent queue)
   createCompileJob(job: CompileJob): Promise<void>;
   getCompileJobForPR(prId: string): Promise<CompileJob | null>;
@@ -110,6 +202,9 @@ interface FileData {
   prs: VibePR[];
   comments: PRComment[];
   compileJobs: CompileJob[];
+  stars: Star[];
+  snapshots: SpecSnapshot[];
+  compilations: Compilation[];
 }
 
 function dataFilePath(): string {
@@ -129,14 +224,22 @@ function dataFilePath(): string {
 
 function readFile(): FileData {
   const p = dataFilePath();
-  if (!fs.existsSync(p)) return { projects: [], features: [], prs: [], comments: [], compileJobs: [] };
+  if (!fs.existsSync(p)) return { projects: [], features: [], prs: [], comments: [], compileJobs: [], stars: [], snapshots: [], compilations: [] };
   try {
     const data = JSON.parse(fs.readFileSync(p, 'utf8'));
-    // Back-compat: files written before compileJobs was added
     if (!data.compileJobs) data.compileJobs = [];
+    if (!data.stars) data.stars = [];
+    if (!data.snapshots) data.snapshots = [];
+    if (!data.compilations) data.compilations = [];
+    // Back-compat: ensure projects have new fields
+    for (const proj of data.projects) {
+      if (proj.visibility === undefined) proj.visibility = 'public';
+      if (proj.starCount === undefined) proj.starCount = 0;
+      if (proj.forkCount === undefined) proj.forkCount = 0;
+    }
     return data;
   } catch {
-    return { projects: [], features: [], prs: [], comments: [], compileJobs: [] };
+    return { projects: [], features: [], prs: [], comments: [], compileJobs: [], stars: [], snapshots: [], compilations: [] };
   }
 }
 
@@ -145,6 +248,11 @@ function writeFile(data: FileData): void {
 }
 
 class FileStore implements Store {
+  async getUserByHandle(_handle: string): Promise<User | null> { return null; }
+  async listUserProjects(handle: string): Promise<Project[]> {
+    return readFile().projects.filter((p) => p.owner === handle);
+  }
+
   async getProject(owner: string, repo: string): Promise<Project | null> {
     return readFile().projects.find(
       (p) => p.owner === owner && p.repo === repo,
@@ -203,6 +311,200 @@ class FileStore implements Store {
     writeFile(data);
   }
 
+  // ── Spec snapshots & compilations ──────────────────────────────────────────
+
+  async createSnapshot(snapshot: SpecSnapshot): Promise<SpecSnapshot> {
+    const data = readFile();
+    // Auto-assign version: max existing version for this project + 1
+    const projectSnapshots = data.snapshots.filter((s) => s.projectId === snapshot.projectId);
+    const maxVersion = projectSnapshots.reduce((max, s) => Math.max(max, s.version), 0);
+    const versioned = { ...snapshot, version: snapshot.version || maxVersion + 1 };
+    data.snapshots.push(versioned);
+    writeFile(data);
+    return versioned;
+  }
+
+  async listSnapshots(projectId: string): Promise<SpecSnapshot[]> {
+    return readFile().snapshots
+      .filter((s) => s.projectId === projectId)
+      .sort((a, b) => a.version - b.version);
+  }
+
+  async getSnapshot(id: string): Promise<SpecSnapshot | null> {
+    return readFile().snapshots.find((s) => s.id === id) ?? null;
+  }
+
+  async getLatestSnapshot(projectId: string): Promise<SpecSnapshot | null> {
+    const snapshots = readFile().snapshots.filter((s) => s.projectId === projectId);
+    if (snapshots.length === 0) return null;
+    return snapshots.reduce((latest, s) => s.version > latest.version ? s : latest);
+  }
+
+  async createCompilation(compilation: Compilation): Promise<void> {
+    const data = readFile();
+    data.compilations.push(compilation);
+    writeFile(data);
+  }
+
+  async listCompilations(snapshotId: string): Promise<Compilation[]> {
+    return readFile().compilations
+      .filter((c) => c.snapshotId === snapshotId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async listProjectCompilations(projectId: string): Promise<Compilation[]> {
+    return readFile().compilations
+      .filter((c) => c.projectId === projectId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  async updateCompilation(
+    id: string,
+    updates: Partial<Pick<Compilation, 'status' | 'code' | 'error' | 'startedAt' | 'completedAt'>>,
+  ): Promise<void> {
+    const data = readFile();
+    const idx = data.compilations.findIndex((c) => c.id === id);
+    if (idx >= 0) data.compilations[idx] = { ...data.compilations[idx], ...updates };
+    writeFile(data);
+  }
+
+  // ── Stars & lineage ───────────────────────────────────────────────────────
+
+  async starProject(star: Star): Promise<void> {
+    const data = readFile();
+    // Idempotent — skip if already starred
+    if (data.stars.some((s) => s.projectId === star.projectId && s.userId === star.userId)) return;
+    data.stars.push(star);
+    // Update cached count
+    const proj = data.projects.find((p) => p.id === star.projectId);
+    if (proj) proj.starCount = data.stars.filter((s) => s.projectId === star.projectId).length;
+    writeFile(data);
+  }
+
+  async unstarProject(projectId: string, userId: string): Promise<void> {
+    const data = readFile();
+    data.stars = data.stars.filter((s) => !(s.projectId === projectId && s.userId === userId));
+    const proj = data.projects.find((p) => p.id === projectId);
+    if (proj) proj.starCount = data.stars.filter((s) => s.projectId === projectId).length;
+    writeFile(data);
+  }
+
+  async isStarred(projectId: string, userId: string): Promise<boolean> {
+    return readFile().stars.some((s) => s.projectId === projectId && s.userId === userId);
+  }
+
+  async getProjectFamily(projectId: string): Promise<ProjectFamily | null> {
+    const data = readFile();
+    const project = data.projects.find((p) => p.id === projectId);
+    if (!project) return null;
+
+    // Walk up to find root
+    let root = project;
+    const seen = new Set<string>([root.id]);
+    while (root.forkedFromId) {
+      const parent = data.projects.find((p) => p.id === root.forkedFromId);
+      if (!parent || seen.has(parent.id)) break;
+      seen.add(parent.id);
+      root = parent;
+    }
+
+    // Collect all descendants of root (BFS)
+    const family: Project[] = [];
+    const queue = [root.id];
+    const visited = new Set<string>();
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (visited.has(current)) continue;
+      visited.add(current);
+      const forks = data.projects.filter((p) => p.forkedFromId === current && p.visibility === 'public');
+      for (const fork of forks) {
+        family.push(fork);
+        queue.push(fork.id);
+      }
+    }
+
+    family.sort((a, b) => b.starCount - a.starCount);
+    const totalStars = root.starCount + family.reduce((sum, f) => sum + f.starCount, 0);
+
+    return { root, variants: family, totalStars };
+  }
+
+  async forkProject(sourceId: string, newOwner: string, newRepo: string): Promise<Project> {
+    const data = readFile();
+    const source = data.projects.find((p) => p.id === sourceId);
+    if (!source) throw new Error('Source project not found');
+
+    const now = new Date().toISOString();
+    const newProject: Project = {
+      id: `${newOwner}-${newRepo}-${Date.now()}`,
+      owner: newOwner,
+      repo: newRepo,
+      description: source.description,
+      forkedFromId: sourceId,
+      compiledWith: source.compiledWith,
+      visibility: 'public',
+      starCount: 0,
+      forkCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    };
+    data.projects.push(newProject);
+
+    // Update source fork count
+    source.forkCount = data.projects.filter((p) => p.forkedFromId === sourceId).length;
+
+    // Copy features
+    const sourceFeatures = data.features.filter((f) => f.projectId === sourceId);
+    for (const f of sourceFeatures) {
+      data.features.push({
+        ...f,
+        id: `${newProject.id}-${f.slug}`,
+        projectId: newProject.id,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    // Find the latest source snapshot and create a fork snapshot referencing it
+    const sourceSnapshots = data.snapshots.filter((s) => s.projectId === sourceId);
+    const latestSourceSnapshot = sourceSnapshots.length > 0
+      ? sourceSnapshots.reduce((latest, s) => s.version > latest.version ? s : latest)
+      : null;
+
+    const forkSnapshot: SpecSnapshot = {
+      id: `snap-${newProject.id}-1`,
+      projectId: newProject.id,
+      version: 1,
+      features: sourceFeatures.map((f) => ({ slug: f.slug, content: f.content })),
+      message: `Forked from ${source.owner}/${source.repo}`,
+      author: newOwner,
+      parentSnapshotId: null,
+      forkedFromSnapshotId: latestSourceSnapshot?.id ?? null,
+      createdAt: now,
+    };
+    data.snapshots.push(forkSnapshot);
+
+    // Also copy the latest compilation if one exists
+    if (latestSourceSnapshot) {
+      const sourceCompilations = data.compilations.filter(
+        (c) => c.snapshotId === latestSourceSnapshot.id && c.status === 'completed',
+      );
+      if (sourceCompilations.length > 0) {
+        const bestCompilation = sourceCompilations[0]; // most recent completed
+        data.compilations.push({
+          ...bestCompilation,
+          id: `comp-${newProject.id}-fork`,
+          snapshotId: forkSnapshot.id,
+          projectId: newProject.id,
+          createdAt: now,
+        });
+      }
+    }
+
+    writeFile(data);
+    return newProject;
+  }
+
   async createCompileJob(job: CompileJob): Promise<void> {
     const data = readFile();
     data.compileJobs.push(job);
@@ -254,6 +556,23 @@ class PostgresStore implements Store {
     return import('../db/schema');
   }
 
+  async getUserByHandle(handle: string): Promise<User | null> {
+    const { eq } = await import('drizzle-orm');
+    const db = await this.db();
+    const { users } = await this.schema();
+    const [row] = await db.select().from(users).where(eq(users.handle, handle)).limit(1);
+    if (!row) return null;
+    return { ...row, name: row.name ?? null, avatarUrl: row.avatarUrl ?? null, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
+  }
+
+  async listUserProjects(handle: string): Promise<Project[]> {
+    const { eq } = await import('drizzle-orm');
+    const db = await this.db();
+    const { projects } = await this.schema();
+    const rows = await db.select().from(projects).where(eq(projects.owner, handle));
+    return rows.map((r) => ({ ...r, description: r.description ?? '', visibility: (r.visibility ?? 'public') as Project['visibility'], starCount: r.starCount ?? 0, forkCount: r.forkCount ?? 0, createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString() }));
+  }
+
   async getProject(owner: string, repo: string): Promise<Project | null> {
     const { eq, and } = await import('drizzle-orm');
     const db = await this.db();
@@ -264,14 +583,14 @@ class PostgresStore implements Store {
       .where(and(eq(projects.owner, owner), eq(projects.repo, repo)))
       .limit(1);
     if (!row) return null;
-    return { ...row, description: row.description ?? '', createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
+    return { ...row, description: row.description ?? '', visibility: (row.visibility ?? 'public') as Project['visibility'], starCount: row.starCount ?? 0, forkCount: row.forkCount ?? 0, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
   }
 
   async listProjects(): Promise<Project[]> {
     const db = await this.db();
     const { projects } = await this.schema();
     const rows = await db.select().from(projects);
-    return rows.map((r) => ({ ...r, description: r.description ?? '', createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString() }));
+    return rows.map((r) => ({ ...r, description: r.description ?? '', visibility: (r.visibility ?? 'public') as Project['visibility'], starCount: r.starCount ?? 0, forkCount: r.forkCount ?? 0, createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString() }));
   }
 
   async upsertProject(p: Project): Promise<void> {
@@ -280,10 +599,21 @@ class PostgresStore implements Store {
     const { projects } = await this.schema();
     await db.insert(projects).values({
       id: p.id, owner: p.owner, repo: p.repo, description: p.description,
+      framework: p.framework ?? null,
+      forkedFromId: p.forkedFromId ?? null, compiledWith: p.compiledWith ?? null,
+      visibility: p.visibility ?? 'public', starCount: p.starCount ?? 0, forkCount: p.forkCount ?? 0,
       createdAt: new Date(p.createdAt), updatedAt: new Date(p.updatedAt),
     }).onConflictDoUpdate({
       target: projects.id,
-      set: { description: p.description, updatedAt: new Date(p.updatedAt) },
+      set: {
+        description: p.description,
+        framework: p.framework ?? null,
+        compiledWith: p.compiledWith ?? null,
+        visibility: p.visibility ?? 'public',
+        starCount: p.starCount ?? 0,
+        forkCount: p.forkCount ?? 0,
+        updatedAt: new Date(p.updatedAt),
+      },
     });
   }
 
@@ -376,8 +706,22 @@ class PostgresStore implements Store {
     });
   }
 
-  // TODO: migrate compileJobs to a proper Postgres table (needs schema + migration).
-  // For now these are stubs — use FileStore in dev or implement with a JSONB jobs table.
+  // TODO: migrate these to proper Postgres tables (needs schema + migration).
+  async createSnapshot(s: SpecSnapshot): Promise<SpecSnapshot> { return s; /* TODO */ }
+  async listSnapshots(_projectId: string): Promise<SpecSnapshot[]> { return []; }
+  async getSnapshot(_id: string): Promise<SpecSnapshot | null> { return null; }
+  async getLatestSnapshot(_projectId: string): Promise<SpecSnapshot | null> { return null; }
+  async createCompilation(_c: Compilation): Promise<void> { /* TODO */ }
+  async listCompilations(_snapshotId: string): Promise<Compilation[]> { return []; }
+  async listProjectCompilations(_projectId: string): Promise<Compilation[]> { return []; }
+  async updateCompilation(_id: string, _updates: Partial<Pick<Compilation, 'status' | 'code' | 'error' | 'startedAt' | 'completedAt'>>): Promise<void> { /* TODO */ }
+
+  async starProject(_star: Star): Promise<void> { /* TODO */ }
+  async unstarProject(_projectId: string, _userId: string): Promise<void> { /* TODO */ }
+  async isStarred(_projectId: string, _userId: string): Promise<boolean> { return false; }
+  async getProjectFamily(_projectId: string): Promise<ProjectFamily | null> { return null; }
+  async forkProject(_sourceId: string, _newOwner: string, _newRepo: string): Promise<Project> { throw new Error('Not implemented'); }
+
   async createCompileJob(_job: CompileJob): Promise<void> { /* TODO */ }
   async getCompileJobForPR(_prId: string): Promise<CompileJob | null> { return null; }
   async claimNextPendingJob(): Promise<CompileJob | null> { return null; }

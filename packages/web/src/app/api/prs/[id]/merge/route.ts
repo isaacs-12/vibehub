@@ -16,10 +16,15 @@ import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getStore } from '@/lib/data/store';
 import { detectConflicts, computeMergedVibes, changedFiles } from '@/lib/vibe-merge';
+import { requireAuth, isAuthError } from '@/lib/auth-middleware';
+import { resolveCompileModel } from '@/lib/resolve-compile-model';
 
 interface Params { params: { id: string } }
 
 export async function POST(req: Request, { params }: Params) {
+  const authResult = await requireAuth(req);
+  if (isAuthError(authResult)) return authResult;
+
   const store = getStore();
   const pr = await store.getPR(params.id);
   if (!pr) return NextResponse.json({ error: 'PR not found' }, { status: 404 });
@@ -31,6 +36,11 @@ export async function POST(req: Request, { params }: Params) {
   const allProjects = await store.listProjects();
   const project = allProjects.find((p) => p.id === pr.projectId);
   if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+
+  // Only the project owner can merge
+  if (project.owner !== authResult.handle) {
+    return NextResponse.json({ error: 'Only the project owner can merge updates' }, { status: 403 });
+  }
 
   const baseFeatures = pr.intentDiff?.baseFeatures ?? [];
   const headFeatures = pr.intentDiff?.headFeatures ?? [];
@@ -76,6 +86,24 @@ export async function POST(req: Request, { params }: Params) {
     });
   }
 
+  // Create an immutable spec snapshot of the merged state
+  const latestSnapshot = await store.getLatestSnapshot(project.id);
+  await store.createSnapshot({
+    id: crypto.randomUUID(),
+    projectId: project.id,
+    version: 0, // auto-assigned by store
+    features: merged.map(({ path, content }) => ({
+      slug: path.split('/').pop()?.replace('.md', '') ?? path,
+      content,
+    })),
+    message: pr.title,
+    author: pr.author,
+    prId: pr.id,
+    parentSnapshotId: latestSnapshot?.id ?? null,
+    forkedFromSnapshotId: null,
+    createdAt: now,
+  });
+
   // Mark PR merged, store merged vibes in intentDiff for the compile job
   const mergedPR = {
     ...pr,
@@ -91,10 +119,16 @@ export async function POST(req: Request, { params }: Params) {
   // Enqueue compile job scoped to the changed files only
   const oldMain = mainFeatures;
   const filesToRecompile = changedFiles(oldMain, merged);
+  const resolved = await resolveCompileModel(authResult.id);
   await store.createCompileJob({
     id: crypto.randomUUID(),
     prId: pr.id,
     status: 'pending',
+    model: resolved.model,
+    provider: resolved.provider,
+    keySource: resolved.keySource,
+    apiKey: resolved.apiKey,
+    userId: authResult.id,
     createdAt: now,
   });
 

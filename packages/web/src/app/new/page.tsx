@@ -2,7 +2,8 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Zap, GitBranch, FolderPlus, Loader2, Check } from 'lucide-react';
+import { useSession } from 'next-auth/react';
+import { Zap, GitBranch, FolderPlus, Loader2, Check, Globe, Link as LinkIcon, Lock } from 'lucide-react';
 
 type Mode = 'blank' | 'import';
 
@@ -19,36 +20,35 @@ type FrameworkId = typeof FRAMEWORKS[number]['id'];
 
 export default function NewProjectPage() {
   const router = useRouter();
+  const { data: session } = useSession();
+  const handle = (session as any)?.handle ?? '';
   const [mode, setMode] = useState<Mode>('blank');
-  const [owner, setOwner] = useState('');
   const [repo, setRepo] = useState('');
   const [description, setDescription] = useState('');
   const [framework, setFramework] = useState<FrameworkId>('nextjs');
   const [repoUrl, setRepoUrl] = useState('');
+  const [visibility, setVisibility] = useState<'public' | 'unlisted' | 'private'>('public');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!owner.trim() || !repo.trim()) {
-      setError('Owner and repository name are required.');
+    if (!handle || !repo.trim()) {
+      setError(handle ? 'Project name is required.' : 'You must be signed in to create a project.');
       return;
     }
     setLoading(true);
     setError('');
-
-    const selected = FRAMEWORKS.find((f) => f.id === framework);
-    const frameworkTag = selected && selected.id !== 'other' ? `[${selected.label}] ` : '';
-    const fullDescription = frameworkTag + (description.trim() || '');
 
     try {
       const res = await fetch('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          owner: owner.trim(),
           repo: repo.trim(),
-          description: fullDescription,
+          description: description.trim(),
+          framework: framework !== 'other' ? framework : undefined,
+          visibility,
           importUrl: mode === 'import' ? repoUrl.trim() : undefined,
         }),
       });
@@ -56,7 +56,7 @@ export default function NewProjectPage() {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error ?? `Server error ${res.status}`);
       }
-      router.push(`/${owner.trim()}/${repo.trim()}`);
+      router.push(`/${handle}/${repo.trim()}`);
     } catch (err) {
       setError(String(err));
       setLoading(false);
@@ -84,7 +84,7 @@ export default function NewProjectPage() {
         <ModeButton
           active={mode === 'import'}
           icon={<GitBranch size={15} />}
-          label="Import existing repo"
+          label="(beta) Import existing codebase"
           description="Extract features from a Git repository"
           onClick={() => setMode('import')}
         />
@@ -93,23 +93,19 @@ export default function NewProjectPage() {
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Owner / Repo */}
         <div className="flex gap-3 items-end">
-          <div className="flex-1">
+          <div className="shrink-0">
             <label className="block text-xs text-fg-muted mb-1.5">Owner</label>
-            <input
-              value={owner}
-              onChange={(e) => setOwner(e.target.value)}
-              placeholder="acme"
-              required
-              className="w-full bg-canvas-subtle border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:border-accent/50 placeholder:text-fg-subtle"
-            />
+            <div className="bg-canvas-subtle border border-border rounded-md px-3 py-2 text-sm text-fg">
+              {handle || '…'}
+            </div>
           </div>
           <span className="text-fg-muted pb-2.5 text-lg">/</span>
           <div className="flex-1">
-            <label className="block text-xs text-fg-muted mb-1.5">Repository name</label>
+            <label className="block text-xs text-fg-muted mb-1.5">Project name</label>
             <input
               value={repo}
               onChange={(e) => setRepo(e.target.value)}
-              placeholder="payments-service"
+              placeholder="my-cool-app"
               required
               className="w-full bg-canvas-subtle border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:border-accent/50 placeholder:text-fg-subtle"
             />
@@ -119,13 +115,14 @@ export default function NewProjectPage() {
         {/* Description */}
         <div>
           <label className="block text-xs text-fg-muted mb-1.5">
-            What does this project do? <span className="text-fg-subtle">(optional)</span>
+            Describe what you want to build
           </label>
-          <input
+          <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="e.g. A billing dashboard with Stripe integration"
-            className="w-full bg-canvas-subtle border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:border-accent/50 placeholder:text-fg-subtle"
+            placeholder={"e.g. A billing dashboard that lets users manage subscriptions, view invoices, and update payment methods. Integrates with Stripe."}
+            rows={3}
+            className="w-full bg-canvas-subtle border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:border-accent/50 placeholder:text-fg-subtle resize-none"
           />
         </div>
 
@@ -151,6 +148,38 @@ export default function NewProjectPage() {
                   {framework === f.id && <Check size={11} className="text-accent-emphasis shrink-0" />}
                 </div>
                 <div className="text-[11px] text-fg-subtle">{f.lang ? `${f.lang} · ` : ''}{f.desc}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Visibility */}
+        <div>
+          <label className="block text-xs text-fg-muted mb-2">Visibility</label>
+          <div className="grid grid-cols-3 gap-2">
+            {([
+              { id: 'public' as const, icon: <Globe size={14} />, label: 'Public', desc: 'Anyone can see this project' },
+              { id: 'unlisted' as const, icon: <LinkIcon size={14} />, label: 'Unlisted', desc: 'Only people with the link' },
+              { id: 'private' as const, icon: <Lock size={14} />, label: 'Private', desc: 'Only you can see it' },
+            ]).map((v) => (
+              <button
+                key={v.id}
+                type="button"
+                onClick={() => setVisibility(v.id)}
+                className={`text-left px-3 py-2.5 rounded-lg border transition-colors ${
+                  visibility === v.id
+                    ? 'border-accent bg-accent-subtle text-fg'
+                    : 'border-border hover:border-fg/20 text-fg-muted'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className={`flex items-center gap-1.5 text-xs font-medium ${visibility === v.id ? 'text-accent-emphasis' : ''}`}>
+                    {v.icon}
+                    {v.label}
+                  </span>
+                  {visibility === v.id && <Check size={11} className="text-accent-emphasis shrink-0" />}
+                </div>
+                <div className="text-[11px] text-fg-subtle">{v.desc}</div>
               </button>
             ))}
           </div>
@@ -191,7 +220,7 @@ export default function NewProjectPage() {
           </button>
           <button
             type="submit"
-            disabled={loading || !owner.trim() || !repo.trim()}
+            disabled={loading || !handle || !repo.trim()}
             className="flex items-center gap-2 px-5 py-2 bg-accent text-white text-sm font-medium rounded-md hover:bg-accent/80 disabled:opacity-40 transition-colors"
           >
             {loading ? (

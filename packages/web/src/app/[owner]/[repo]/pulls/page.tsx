@@ -22,7 +22,7 @@ export default async function PullRequestsPage({ params }: Props) {
       <div className="flex items-center justify-between mb-6">
         <div>
           <div className="text-sm text-fg-muted mb-1">
-            <Link href={`/${owner}/${repo}`} className="hover:text-fg">{owner}/{repo}</Link>
+            <Link href={`/${owner}/${repo}` as any} className="hover:text-fg">{owner}/{repo}</Link>
             {' / '}
             <span className="text-fg">Updates</span>
           </div>

@@ -9,6 +9,7 @@
  * Response: { mergedContent }
  */
 import { NextResponse } from 'next/server';
+import { requireAuth, isAuthError } from '@/lib/auth-middleware';
 
 interface Params { params: { id: string } }
 
@@ -20,6 +21,9 @@ interface FeatherBody {
 }
 
 export async function POST(req: Request, { _params }: { _params: Params }) {
+  const authResult = await requireAuth(req);
+  if (isAuthError(authResult)) return authResult;
+
   const body = await req.json().catch(() => null) as FeatherBody | null;
   if (!body?.name) return NextResponse.json({ error: 'name is required' }, { status: 400 });
 

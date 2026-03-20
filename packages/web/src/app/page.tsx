@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 import { ArrowRight, Loader2, Sparkles } from 'lucide-react';
 
 interface Project {
@@ -15,6 +16,7 @@ interface Project {
 
 export default function HomePage() {
   const router = useRouter();
+  const { data: session } = useSession();
   const [prompt, setPrompt] = useState('');
   const [creating, setCreating] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -32,25 +34,30 @@ export default function HomePage() {
     if (!prompt.trim() || creating) return;
     setCreating(true);
 
-    // Auto-derive a repo slug from the description
-    const words = prompt.trim().toLowerCase().split(/\s+/);
+    // Extract key nouns for the slug — skip filler words
+    const stopWords = new Set(['a', 'an', 'the', 'that', 'this', 'where', 'which', 'with', 'and', 'or', 'for', 'to', 'in', 'on', 'my', 'our', 'is', 'are', 'can', 'do', 'app', 'application', 'i', 'we', 'lets', 'let']);
+    const words = prompt.trim().toLowerCase().split(/\s+/).filter((w) => !stopWords.has(w));
     const repo =
       words
-        .slice(0, 5)
+        .slice(0, 3)
         .join('-')
         .replace(/[^a-z0-9-]/g, '')
         .replace(/-+/g, '-')
         .replace(/^-|-$/g, '')
-        .slice(0, 50) || 'my-project';
-    const owner = 'my';
+        .slice(0, 40) || 'my-project';
+    const handle = (session as any)?.handle ?? 'my';
 
     try {
-      await fetch('/api/projects', {
+      const res = await fetch('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ owner, repo, description: prompt.trim() }),
+        body: JSON.stringify({ repo, description: prompt.trim() }),
       });
-      router.push(`/${owner}/${repo}`);
+      if (res.ok) {
+        router.push(`/${handle}/${repo}`);
+      } else {
+        setCreating(false);
+      }
     } catch {
       setCreating(false);
     }
@@ -129,12 +136,10 @@ export default function HomePage() {
               >
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-fg group-hover:text-accent-emphasis transition-colors truncate">
-                    {p.description
-                      ? p.description.replace(/^\[.*?\]\s*/, '')
-                      : `${p.owner}/${p.repo}`}
+                    {p.owner}/{p.repo}
                   </div>
                   {p.description && (
-                    <div className="text-xs text-fg-subtle mt-0.5 font-mono">{p.owner}/{p.repo}</div>
+                    <div className="text-xs text-fg-muted mt-0.5 truncate">{p.description}</div>
                   )}
                 </div>
                 <ArrowRight size={13} className="text-fg-subtle group-hover:text-accent-emphasis transition-colors shrink-0 ml-3" />

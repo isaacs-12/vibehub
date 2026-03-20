@@ -51,7 +51,21 @@ function createSession(title = 'New chat'): ChatSession {
   return { id: crypto.randomUUID(), title, messages: [] };
 }
 
+export interface AuthUser {
+  id: string;
+  handle: string;
+  email: string;
+  name: string;
+  avatarUrl: string | null;
+}
+
 interface VibeStore {
+  // Auth
+  authUser: AuthUser | null;
+  authToken: string | null;
+  setAuth: (user: AuthUser, token: string) => void;
+  clearAuth: () => void;
+
   // Project
   projectRoot: string | null;
   features: FeatureNode[];
@@ -119,6 +133,20 @@ interface VibeStore {
 
 const initialSession = createSession('Chat 1');
 export const useVibeStore = create<VibeStore>((set, get) => ({
+  // Auth
+  authUser: null,
+  authToken: null,
+  setAuth: (user, token) => {
+    localStorage.setItem('vibehub_auth_token', token);
+    localStorage.setItem('vibehub_auth_user', JSON.stringify(user));
+    set({ authUser: user, authToken: token });
+  },
+  clearAuth: () => {
+    localStorage.removeItem('vibehub_auth_token');
+    localStorage.removeItem('vibehub_auth_user');
+    set({ authUser: null, authToken: null });
+  },
+
   projectRoot: null,
   features: [],
   selectedFeature: null,

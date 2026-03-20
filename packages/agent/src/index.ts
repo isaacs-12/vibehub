@@ -15,8 +15,10 @@
  *   AGENT_SECRET      — must match AGENT_SECRET on the web backend (optional in dev)
  */
 
-import { runCompileJob } from './agent.ts';
+import http from 'node:http';
+import { runCompileJob, type CompileEvent } from './agent.ts';
 
+const PORT = Number(process.env.PORT ?? 8080);
 const API_URL = (process.env.VIBEHUB_API_URL ?? 'http://localhost:3000').replace(/\/$/, '');
 const AGENT_SECRET = process.env.AGENT_SECRET ?? '';
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? 5000);
@@ -43,7 +45,10 @@ async function pollOnce() {
   console.log(`[agent] picked up job ${job.id} for PR ${job.prId}`);
 
   try {
-    const proofs = await runCompileJob(pr?.intentDiff?.headFeatures ?? []);
+    const onProgress = (event: CompileEvent) => {
+      console.log(`[agent] [${job.id}] ${event.type}`, 'feature' in event ? event.feature : '');
+    };
+    const proofs = await runCompileJob(pr?.intentDiff?.headFeatures ?? [], onProgress);
     await fetch(`${API_URL}/api/agent/jobs/${job.id}`, {
       method: 'PATCH',
       headers: headers(),
@@ -62,6 +67,11 @@ async function pollOnce() {
 }
 
 async function main() {
+  // Cloud Run requires a listening port for health checks
+  http.createServer((_req, res) => { res.writeHead(200); res.end('ok'); }).listen(PORT, () => {
+    console.log(`[agent] health-check server on :${PORT}`);
+  });
+
   console.log(`[agent] starting — polling ${API_URL} every ${POLL_INTERVAL_MS}ms`);
   while (true) {
     try {

@@ -1,18 +1,23 @@
 import React from 'react';
 import Link from 'next/link';
-import { Zap, GitBranch, Search } from 'lucide-react';
+import { Zap, GitFork, Star, Cpu } from 'lucide-react';
 import { getStore } from '@/lib/data/store';
 
 export default async function ExplorePage() {
   const projects = await getStore().listProjects();
+
+  // Only show public projects, sorted by stars then recency
+  const visible = projects
+    .filter((p) => p.visibility === 'public')
+    .sort((a, b) => b.starCount - a.starCount || b.updatedAt.localeCompare(a.updatedAt));
 
   return (
     <div className="mx-auto max-w-screen-xl px-4 py-10">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-xl font-semibold text-fg">Explore Projects</h1>
-          <p className="text-sm text-fg-muted mt-0.5">Browse projects built with VibeHub.</p>
+          <h1 className="text-xl font-semibold text-fg">Explore Tools</h1>
+          <p className="text-sm text-fg-muted mt-0.5">Discover, fork, and improve tools built with VibeHub.</p>
         </div>
         <Link
           href="/new"
@@ -23,27 +28,18 @@ export default async function ExplorePage() {
         </Link>
       </div>
 
-      {/* Search bar */}
-      <div className="flex items-center gap-2 bg-canvas-subtle border border-border rounded-md px-3 py-2 mb-6 max-w-md">
-        <Search size={14} className="text-fg-muted shrink-0" />
-        <input
-          placeholder="Search projects…"
-          className="flex-1 bg-transparent text-sm focus:outline-none placeholder:text-fg-subtle"
-        />
-      </div>
-
       {/* Project grid */}
-      {projects.length === 0 ? (
+      {visible.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-64 text-center gap-3">
-          <div className="text-5xl opacity-20">◈</div>
-          <p className="text-sm text-fg-muted">No projects yet.</p>
+          <div className="text-5xl opacity-20">{'\u25C8'}</div>
+          <p className="text-sm text-fg-muted">No tools yet.</p>
           <Link href="/new" className="text-xs text-accent-emphasis hover:underline">
-            Create your first project →
+            Create your first project {'\u2192'}
           </Link>
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {projects.map((p) => (
+          {visible.map((p) => (
             <Link
               key={p.id}
               href={`/${p.owner}/${p.repo}`}
@@ -56,9 +52,29 @@ export default async function ExplorePage() {
               {p.description && (
                 <p className="text-sm text-fg-muted mb-3 line-clamp-2">{p.description}</p>
               )}
-              <div className="text-xs text-fg-subtle flex items-center gap-1">
-                <GitBranch size={10} />
-                {new Date(p.createdAt).toLocaleDateString()}
+              <div className="flex items-center gap-3 text-xs text-fg-subtle">
+                <span className="flex items-center gap-1">
+                  <Star size={10} className={p.starCount > 0 ? 'text-yellow-400 fill-yellow-400' : ''} />
+                  {p.starCount}
+                </span>
+                {p.forkCount > 0 && (
+                  <span className="flex items-center gap-1">
+                    <GitFork size={10} />
+                    {p.forkCount}
+                  </span>
+                )}
+                {p.compiledWith && (
+                  <span className="flex items-center gap-1">
+                    <Cpu size={9} />
+                    {p.compiledWith}
+                  </span>
+                )}
+                {p.forkedFromId && (
+                  <span className="flex items-center gap-1">
+                    <GitFork size={9} className="text-accent-emphasis" />
+                    fork
+                  </span>
+                )}
               </div>
             </Link>
           ))}

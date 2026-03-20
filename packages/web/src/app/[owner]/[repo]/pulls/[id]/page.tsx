@@ -1,13 +1,14 @@
 import React from 'react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { GitPullRequest, GitMerge, MessageSquare, CheckCircle2, Code2, Loader2, XCircle } from 'lucide-react';
+import { GitPullRequest, GitMerge, MessageSquare, CheckCircle2, Code2 } from 'lucide-react';
 import { getStore } from '@/lib/data/store';
 import { auth } from '@/lib/auth';
 import IntentDiff from '@/components/VibePR/IntentDiff';
 import ImplementationProofs from '@/components/VibePR/ImplementationProofs';
 import ReviewThread from '@/components/VibePR/ReviewThread';
 import MergeButton from '@/components/VibePR/MergeButton';
+import CompileProgress from '@/components/VibePR/CompileProgress';
 
 interface Props {
   params: { owner: string; repo: string; id: string };
@@ -98,22 +99,12 @@ export default async function VibePRPage({ params }: Props) {
           <Code2 size={14} />
           <span>Generated code</span>
           <span className="bg-canvas-subtle border border-border text-xs px-1.5 py-0.5 rounded ml-1">AI-generated</span>
-          {compileJob && compileJob.status === 'pending' && (
-            <span className="flex items-center gap-1 text-xs text-fg-muted ml-2">
-              <Loader2 size={11} className="animate-spin" /> Queued for cloud compile
-            </span>
-          )}
-          {compileJob && compileJob.status === 'running' && (
-            <span className="flex items-center gap-1 text-xs text-accent-emphasis ml-2">
-              <Loader2 size={11} className="animate-spin" /> Compiling…
-            </span>
-          )}
-          {compileJob && compileJob.status === 'failed' && (
-            <span className="flex items-center gap-1 text-xs text-red-400 ml-2">
-              <XCircle size={11} /> Compile failed: {compileJob.error}
-            </span>
-          )}
         </div>
+        {compileJob && (compileJob.status === 'pending' || compileJob.status === 'running') && (
+          <div className="mb-4">
+            <CompileProgress jobId={compileJob.id} initialStatus={compileJob.status} />
+          </div>
+        )}
         <ImplementationProofs implementationProofs={pr.intentDiff?.implementationProofs ?? []} />
       </div>
 

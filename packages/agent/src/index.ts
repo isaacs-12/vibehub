@@ -45,10 +45,41 @@ async function pollOnce() {
   console.log(`[agent] picked up job ${job.id} for PR ${job.prId}`);
 
   try {
-    const onProgress = (event: CompileEvent) => {
-      console.log(`[agent] [${job.id}] ${event.type}`, 'feature' in event ? event.feature : '');
+    // Buffer events and flush to server periodically to avoid excessive requests
+    let eventBuffer: Array<CompileEvent & { timestamp: string }> = [];
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const flushEvents = async () => {
+      if (eventBuffer.length === 0) return;
+      const batch = eventBuffer;
+      eventBuffer = [];
+      try {
+        await fetch(`${API_URL}/api/agent/jobs/${job.id}`, {
+          method: 'PATCH',
+          headers: headers(),
+          body: JSON.stringify({ events: batch }),
+        });
+      } catch (err) {
+        console.error(`[agent] failed to push events:`, err);
+      }
     };
+
+    const onProgress = (event: CompileEvent) => {
+      console.log(`[agent] [${job.id}] ${event.type}`, 'slug' in event ? (event as any).slug : '');
+      eventBuffer.push({ ...event, timestamp: new Date().toISOString() });
+      // Flush every 2 seconds at most
+      if (!flushTimer) {
+        flushTimer = setTimeout(async () => {
+          flushTimer = null;
+          await flushEvents();
+        }, 2000);
+      }
+    };
+
     const proofs = await runCompileJob(pr?.intentDiff?.headFeatures ?? [], onProgress);
+    // Flush any remaining events before reporting completion
+    if (flushTimer) clearTimeout(flushTimer);
+    await flushEvents();
     await fetch(`${API_URL}/api/agent/jobs/${job.id}`, {
       method: 'PATCH',
       headers: headers(),

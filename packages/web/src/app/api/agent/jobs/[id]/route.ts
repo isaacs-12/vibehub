@@ -24,6 +24,16 @@ export async function PATCH(req: Request, { params }: Params) {
   if (!checkAuth(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const body = await req.json().catch(() => null);
+
+  // ── Incremental event push (no status change) ──
+  if (body?.events && !body?.status) {
+    const events = Array.isArray(body.events) ? body.events : [];
+    if (events.length > 0) {
+      await getStore().appendCompileJobEvents(params.id, events);
+    }
+    return NextResponse.json({ ok: true });
+  }
+
   if (!body?.status || !body?.prId) {
     return NextResponse.json({ error: 'status and prId are required' }, { status: 400 });
   }

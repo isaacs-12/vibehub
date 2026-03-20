@@ -138,10 +138,19 @@ export interface CompileJob {
   keySource?: string;
   /** The user who triggered this job (null for anonymous). */
   userId?: string | null;
+  /** Real-time progress events appended by the agent during compilation. */
+  events?: CompileJobEvent[];
   createdAt: string;
   startedAt?: string;
   completedAt?: string;
   error?: string;
+}
+
+/** A single progress event emitted by the agent during compilation. */
+export interface CompileJobEvent {
+  type: string;
+  timestamp: string;
+  [key: string]: unknown;
 }
 
 // ─── Store interface ──────────────────────────────────────────────────────────
@@ -193,6 +202,10 @@ export interface Store {
   /** Atomically claims the next pending job by setting it to 'running'. Returns null if queue is empty. */
   claimNextPendingJob(): Promise<CompileJob | null>;
   updateCompileJob(id: string, updates: Partial<Pick<CompileJob, 'status' | 'startedAt' | 'completedAt' | 'error'>>): Promise<void>;
+  /** Append progress events to a running compile job. */
+  appendCompileJobEvents(id: string, events: CompileJobEvent[]): Promise<void>;
+  /** Get a compile job by ID. */
+  getCompileJob(id: string): Promise<CompileJob | null>;
 }
 
 // ─── File store (local dev) ───────────────────────────────────────────────────
@@ -546,6 +559,20 @@ class FileStore implements Store {
     if (idx >= 0) data.compileJobs[idx] = { ...data.compileJobs[idx], ...updates };
     writeFile(data);
   }
+
+  async appendCompileJobEvents(id: string, events: CompileJobEvent[]): Promise<void> {
+    const data = readFile();
+    const idx = data.compileJobs.findIndex((j) => j.id === id);
+    if (idx >= 0) {
+      const job = data.compileJobs[idx];
+      job.events = [...(job.events ?? []), ...events];
+      writeFile(data);
+    }
+  }
+
+  async getCompileJob(id: string): Promise<CompileJob | null> {
+    return readFile().compileJobs.find((j) => j.id === id) ?? null;
+  }
 }
 
 // ─── Postgres store (production) ──────────────────────────────────────────────
@@ -740,6 +767,8 @@ class PostgresStore implements Store {
   async getCompileJobForPR(_prId: string): Promise<CompileJob | null> { return null; }
   async claimNextPendingJob(): Promise<CompileJob | null> { return null; }
   async updateCompileJob(_id: string, _updates: Partial<Pick<CompileJob, 'status' | 'startedAt' | 'completedAt' | 'error'>>): Promise<void> { /* TODO */ }
+  async appendCompileJobEvents(_id: string, _events: CompileJobEvent[]): Promise<void> { /* TODO */ }
+  async getCompileJob(_id: string): Promise<CompileJob | null> { return null; }
 }
 
 // ─── Singleton factory ────────────────────────────────────────────────────────

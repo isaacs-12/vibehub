@@ -29,13 +29,26 @@ curl -fsSL https://getvibehub.com/install.sh | sh`}</CodeBlock>
         {/* Build-from-source instructions will be added once the repo is public. */}
       </Section>
 
-      <Section title="2. Initialize a project">
+      <Section title="2. Create a project">
+        <p>
+          You can start a project from the web or locally. The easiest way is to
+          create one on{' '}
+          <a href="/" className="text-accent-emphasis hover:underline">
+            getvibehub.com
+          </a>{' '}
+          (sign in, describe your idea, done), then clone it locally:
+        </p>
+        <CodeBlock>{`vibe clone your-handle/my-app`}</CodeBlock>
+        <p>
+          Or start purely locally with <Code>vibe init</Code>:
+        </p>
         <CodeBlock>{`mkdir my-app && cd my-app
 vibe init my-app`}</CodeBlock>
-        <p>This creates a <Code>.vibe/</Code> directory with starter files:</p>
+        <p>Either way, you end up with a <Code>.vibe/</Code> directory:</p>
         <CodeBlock>{`.vibe/
 ├── meta.json          # Project name, version
 ├── project.json       # Build/dev/test commands
+├── remote.json        # Connection to VibeHub (if cloned)
 ├── features/
 │   └── overview.md    # Your first feature spec
 └── requirements/      # Tech stack & constraints`}</CodeBlock>
@@ -84,20 +97,23 @@ vibe compile`}</CodeBlock>
           and requirement validation. You&apos;ll see a report at the end showing
           what was generated and whether it passes.
         </p>
+        <p>
+          If you created your project on VibeHub, you can also trigger a cloud
+          compile from the web UI &mdash; no local API key needed.
+        </p>
       </Section>
 
-      <Section title="5. Push to VibeHub">
+      <Section title="5. Review & iterate">
         <p>
-          Create an account at{' '}
-          <a href="/" className="text-accent-emphasis hover:underline">
-            getvibehub.com
-          </a>{' '}
-          and create a project through the web UI. Then clone it locally:
+          If your project is connected to VibeHub (via{' '}
+          <Code>vibe clone</Code> or VibeStudio), your specs sync between local
+          and web. Changes you push from the desktop or CLI appear as reviewable
+          updates on the web, where you and your team can review intent changes
+          in plain English before merging.
         </p>
-        <CodeBlock>{`vibe clone your-handle/my-app`}</CodeBlock>
         <p>
-          Your specs sync between VibeStudio (desktop), the CLI, and VibeHub
-          (web). Changes you push appear as reviewable updates on the web.
+          The typical loop: edit specs locally, compile to verify, push to
+          VibeHub for review, merge, repeat.
         </p>
       </Section>
 

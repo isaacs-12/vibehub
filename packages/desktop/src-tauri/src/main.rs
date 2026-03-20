@@ -1,3 +1,3 @@
 fn main() {
-    vibe_studio_lib::run();
+    vibestudio_lib::run();
 }

@@ -75,6 +75,8 @@ help:
 	@echo "    make deploy-web     Build & deploy web to Cloud Run"
 	@echo "    make deploy-agent   Build & deploy agent to Cloud Run"
 	@echo "    make deploy-all     Deploy both web + agent"
+	@echo "    make build-desktop  Build VibeStudio .app/.dmg"
+	@echo "    make release-desktop VERSION=x.y.z  Build + create GitHub release"
 	@echo "    make db-migrate-prod  Run Drizzle push against prod DATABASE_URL"
 	@echo "    make secrets-list   List required GCP secrets"
 	@echo "    make secrets-create Create all secret placeholders in Secret Manager"
@@ -346,6 +348,39 @@ secrets-create: gcp-check
 .PHONY: lint
 lint: venv
 	$(VENV)/bin/pre-commit run --all-files
+
+# ── Desktop release ───────────────────────────────────────────────────────────
+.PHONY: build-desktop release-desktop
+
+# Build VibeStudio for the current platform (macOS .dmg + .app, or Windows .msi)
+build-desktop:
+	@echo "  Building VibeStudio…"
+	$(NPM) run tauri build --workspace=packages/desktop
+	@echo "  $(GREEN)✔ Desktop build complete$(RESET)"
+	@echo "  Artifacts: packages/desktop/src-tauri/target/release/bundle/"
+
+# Build + create a GitHub release with the desktop artifact
+# Usage: make release-desktop VERSION=0.2.0
+release-desktop: build-desktop
+	@if [ -z "$(VERSION)" ]; then echo "  $(RED)✘ VERSION required$(RESET)  Usage: make release-desktop VERSION=0.2.0"; exit 1; fi
+	@command -v gh >/dev/null 2>&1 || { echo "  $(RED)✘ gh CLI not found$(RESET)  Install: brew install gh"; exit 1; fi
+	@echo "  Creating GitHub release v$(VERSION)…"
+	@DMG=$$(find packages/desktop/src-tauri/target/release/bundle/dmg -name '*.dmg' 2>/dev/null | head -1); \
+	APP_PATH=$$(find packages/desktop/src-tauri/target/release/bundle/macos -name '*.app' 2>/dev/null | head -1); \
+	ASSETS=""; \
+	if [ -n "$$DMG" ]; then ASSETS="$$ASSETS $$DMG"; echo "  Found DMG: $$DMG"; fi; \
+	if [ -n "$$APP_PATH" ]; then \
+		TAR_NAME="VibeStudio-$(VERSION)-macos.tar.gz"; \
+		tar -czf "$$TAR_NAME" -C "$$(dirname $$APP_PATH)" "$$(basename $$APP_PATH)"; \
+		ASSETS="$$ASSETS $$TAR_NAME"; \
+		echo "  Created: $$TAR_NAME"; \
+	fi; \
+	if [ -z "$$ASSETS" ]; then echo "  $(RED)✘ No artifacts found$(RESET)"; exit 1; fi; \
+	gh release create "v$(VERSION)" $$ASSETS \
+		--title "VibeStudio v$(VERSION)" \
+		--notes "VibeStudio desktop app v$(VERSION)" \
+		--latest
+	@echo "  $(GREEN)✔ Released v$(VERSION)$(RESET)"
 
 # ── Clean ─────────────────────────────────────────────────────────────────────
 .PHONY: clean

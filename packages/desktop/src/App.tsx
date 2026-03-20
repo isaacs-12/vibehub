@@ -8,38 +8,63 @@ import ChatSidebar from './components/ChatSidebar/ChatSidebar.tsx';
 import OutputPanel from './components/OutputPanel/OutputPanel.tsx';
 import StatusBar from './components/StatusBar/StatusBar.tsx';
 import ToolsView from './components/ToolsView/ToolsView.tsx';
+import AboutDialog from './components/AboutDialog.tsx';
+import UpdateCheckDialog from './components/UpdateCheckDialog.tsx';
 import { useVibeStore } from './store/index.ts';
 import { useVibeProject } from './hooks/useVibeProject.ts';
 
-function handleMenuEvent(id: string, openProject: (root: string) => Promise<void>) {
+function handleMenuEvent(
+  id: string,
+  openProject: (root: string) => Promise<void>,
+  setAboutOpen: (v: boolean) => void,
+  setUpdateCheckOpen: (v: boolean) => void,
+) {
+  const store = useVibeStore.getState();
   switch (id) {
-    case 'file-new-project': {
-      useVibeStore.getState().setNewProjectModalOpen(true);
+    case 'app-about':
+      setAboutOpen(true);
       break;
-    }
-    case 'file-open-project': {
+    case 'app-check-updates':
+      setUpdateCheckOpen(true);
+      break;
+    case 'file-new-project':
+      store.setNewProjectModalOpen(true);
+      break;
+    case 'file-open-project':
       import('@tauri-apps/plugin-dialog').then(async ({ open }) => {
         const selected = await open({ directory: true, multiple: false, title: 'Open Vibe Project' });
         if (selected && typeof selected === 'string') {
           await openProject(selected);
-          useVibeStore.getState().setAppMode('editor');
+          store.setAppMode('editor');
         }
       });
       break;
-    }
-    case 'file-save': {
-      const store = useVibeStore.getState();
-      if (store.isDirty) {
-        store.saveFeature();
-      }
+    case 'file-save':
+      if (store.isDirty) store.saveFeature();
       break;
-    }
+    case 'view-mode-editor':
+      store.setAppMode('editor');
+      break;
+    case 'view-mode-tools':
+      store.setAppMode('tools');
+      break;
+    case 'view-toggle-code-peek':
+      store.toggleCodePeek();
+      break;
+    case 'view-toggle-output':
+      store.setRunOutputVisible(!store.runOutputVisible);
+      break;
+    case 'view-toggle-chat':
+      store.setChatOpen(!store.chatOpen);
+      break;
   }
 }
 
 export default function App() {
   const { codePeekVisible, chatOpen, runOutputVisible, appendRunOutput, setRunInProgress, appMode, newProjectModalOpen } = useVibeStore();
   const { openProject } = useVibeProject();
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [updateCheckOpen, setUpdateCheckOpen] = useState(false);
 
   // On mount, try to load from last session or prompt user
   useEffect(() => {
@@ -68,7 +93,7 @@ export default function App() {
         unlistenEnded = fn;
       });
       listen<string>('menu-event', (e) => {
-        handleMenuEvent(e.payload, openProject);
+        handleMenuEvent(e.payload, openProject, setAboutOpen, setUpdateCheckOpen);
       }).then((fn) => {
         unlistenMenu = fn;
       });
@@ -138,6 +163,8 @@ export default function App() {
       </div>
       <StatusBar />
       {newProjectModalOpen && <NewProjectModal openProject={openProject} />}
+      {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
+      {updateCheckOpen && <UpdateCheckDialog onClose={() => setUpdateCheckOpen(false)} />}
     </div>
   );
 }

@@ -13,9 +13,60 @@ use commands::{
     write_vibe_file, RunState,
 };
 use std::sync::Arc;
-use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{Emitter, Manager};
 use tokio::sync::Mutex;
+
+/// Returns the current app version from Cargo.toml at compile time.
+#[tauri::command]
+fn get_app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+/// Check for updates by fetching the latest GitHub release tag.
+#[tauri::command]
+async fn check_for_updates() -> Result<serde_json::Value, String> {
+    let current = env!("CARGO_PKG_VERSION");
+    let client = reqwest::Client::builder()
+        .user_agent("VibeStudio")
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let resp = client
+        .get("https://api.github.com/repos/isaacs-12/vibehub/releases/latest")
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+
+    if resp.status().as_u16() == 404 {
+        return Ok(serde_json::json!({
+            "current": current,
+            "latest": current,
+            "update_available": false,
+            "message": "No releases found yet."
+        }));
+    }
+
+    if !resp.status().is_success() {
+        return Err(format!("GitHub API error: {}", resp.status()));
+    }
+
+    let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    let tag = body["tag_name"]
+        .as_str()
+        .unwrap_or("")
+        .trim_start_matches('v');
+    let html_url = body["html_url"].as_str().unwrap_or("");
+
+    let update_available = tag != current && !tag.is_empty();
+
+    Ok(serde_json::json!({
+        "current": current,
+        "latest": tag,
+        "update_available": update_available,
+        "release_url": html_url,
+    }))
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -23,7 +74,27 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(RunState(Arc::new(Mutex::new(None::<u32>))))
         .setup(|app| {
-            // ── Native application menu ──────────────────────────────────────
+            // ── VibeStudio (app) menu ─────────────────────────────────────────
+            let about = MenuItemBuilder::new("About VibeStudio")
+                .id("app-about")
+                .build(app)?;
+
+            let check_updates = MenuItemBuilder::new("Check for Updates…")
+                .id("app-check-updates")
+                .build(app)?;
+
+            let app_menu = SubmenuBuilder::new(app, "VibeStudio")
+                .item(&about)
+                .item(&check_updates)
+                .separator()
+                .item(&PredefinedMenuItem::hide(app, Some("Hide VibeStudio"))?)
+                .item(&PredefinedMenuItem::hide_others(app, Some("Hide Others"))?)
+                .item(&PredefinedMenuItem::show_all(app, Some("Show All"))?)
+                .separator()
+                .item(&PredefinedMenuItem::quit(app, Some("Quit VibeStudio"))?)
+                .build()?;
+
+            // ── File menu ─────────────────────────────────────────────────────
             let new_project = MenuItemBuilder::new("New Project…")
                 .id("file-new-project")
                 .accelerator("CmdOrCtrl+Shift+N")
@@ -44,8 +115,11 @@ pub fn run() {
                 .item(&open_project)
                 .separator()
                 .item(&save)
+                .separator()
+                .close_window()
                 .build()?;
 
+            // ── Edit menu ─────────────────────────────────────────────────────
             let edit_menu = SubmenuBuilder::new(app, "Edit")
                 .undo()
                 .redo()
@@ -56,16 +130,94 @@ pub fn run() {
                 .select_all()
                 .build()?;
 
+            // ── View menu ─────────────────────────────────────────────────────
+            let toggle_code_peek = MenuItemBuilder::new("Toggle Code Peek")
+                .id("view-toggle-code-peek")
+                .accelerator("CmdOrCtrl+Shift+C")
+                .build(app)?;
+
+            let toggle_output = MenuItemBuilder::new("Toggle Output Panel")
+                .id("view-toggle-output")
+                .accelerator("CmdOrCtrl+Shift+O")
+                .build(app)?;
+
+            let toggle_chat = MenuItemBuilder::new("Toggle Vibe Chat")
+                .id("view-toggle-chat")
+                .accelerator("CmdOrCtrl+Shift+K")
+                .build(app)?;
+
+            let mode_editor = MenuItemBuilder::new("Editor Mode")
+                .id("view-mode-editor")
+                .accelerator("CmdOrCtrl+1")
+                .build(app)?;
+
+            let mode_tools = MenuItemBuilder::new("Tools Mode")
+                .id("view-mode-tools")
+                .accelerator("CmdOrCtrl+2")
+                .build(app)?;
+
+            let view_menu = SubmenuBuilder::new(app, "View")
+                .item(&mode_editor)
+                .item(&mode_tools)
+                .separator()
+                .item(&toggle_code_peek)
+                .item(&toggle_output)
+                .item(&toggle_chat)
+                .separator()
+                .fullscreen()
+                .build()?;
+
+            // ── Window menu ───────────────────────────────────────────────────
+            let window_menu = SubmenuBuilder::new(app, "Window")
+                .minimize()
+                .maximize()
+                .separator()
+                .close_window()
+                .build()?;
+
+            // ── Help menu ─────────────────────────────────────────────────────
+            let docs = MenuItemBuilder::new("VibeStudio Documentation")
+                .id("help-docs")
+                .build(app)?;
+
+            let report_issue = MenuItemBuilder::new("Report an Issue…")
+                .id("help-report-issue")
+                .build(app)?;
+
+            let help_menu = SubmenuBuilder::new(app, "Help")
+                .item(&docs)
+                .item(&report_issue)
+                .build()?;
+
             let menu = MenuBuilder::new(app)
-                .items(&[&file_menu, &edit_menu])
+                .items(&[
+                    &app_menu,
+                    &file_menu,
+                    &edit_menu,
+                    &view_menu,
+                    &window_menu,
+                    &help_menu,
+                ])
                 .build()?;
 
             app.set_menu(menu)?;
 
-            // ── Menu event handler ───────────────────────────────────────────
+            // ── Menu event handler ────────────────────────────────────────────
             app.on_menu_event(move |app_handle, event| {
                 let id = event.id().as_ref();
-                let _ = app_handle.emit("menu-event", id);
+                // Open external URLs for help items
+                match id {
+                    "help-docs" => {
+                        let _ = open::that("https://getvibehub.com/docs/vibestudio");
+                    }
+                    "help-report-issue" => {
+                        let _ = open::that("https://github.com/isaacs-12/vibehub/issues/new");
+                    }
+                    _ => {
+                        // Forward all other menu events to the frontend
+                        let _ = app_handle.emit("menu-event", id);
+                    }
+                }
             });
 
             Ok(())
@@ -100,6 +252,8 @@ pub fn run() {
             read_tool_config,
             save_tool_config,
             create_new_project,
+            get_app_version,
+            check_for_updates,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -90,7 +90,7 @@ export default function TopBar() {
     <header className="flex items-center justify-between h-10 px-4 bg-surface-raised border-b border-surface-border shrink-0">
       {/* Left: app name + mode toggle + open project */}
       <div className="flex items-center gap-3">
-        <span className="font-semibold text-accent-light text-sm tracking-wide">Vibe Studio</span>
+        <span className="font-semibold text-accent-light text-sm tracking-wide">VibeStudio</span>
         <ModeToggle mode={appMode} onChange={setAppMode} />
         <button
           onClick={handleOpenProject}
@@ -135,7 +135,7 @@ export default function TopBar() {
               ? 'border-accent bg-accent/20 text-accent-light'
               : 'border-surface-border text-muted hover:text-gray-200 hover:border-gray-500'
           }`}
-          title={codePeekVisible ? 'Hide Code Peek' : 'Show Code Peek'}
+          title={codePeekVisible ? 'Hide Code Peek (Cmd+Shift+C)' : 'Show Code Peek (Cmd+Shift+C)'}
         >
           <Code2 size={12} />
           Code
@@ -143,6 +143,7 @@ export default function TopBar() {
         {runInProgress ? (
           <button
             onClick={handleStop}
+            title="Stop the running dev server"
             className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-red-500/50 text-red-400 hover:border-red-400 hover:text-red-300 transition-colors"
           >
             <Square size={12} />
@@ -151,6 +152,7 @@ export default function TopBar() {
         ) : (
           <button
             onClick={handleRun}
+            title="Run the project's dev server"
             className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border border-surface-border text-muted hover:text-gray-200 hover:border-gray-500 transition-colors"
           >
             <Play size={12} />
@@ -159,6 +161,7 @@ export default function TopBar() {
         )}
         <button
           onClick={() => setChatOpen(!chatOpen)}
+          title={chatOpen ? 'Close Vibe Chat (Cmd+Shift+K)' : 'Open Vibe Chat (Cmd+Shift+K)'}
           className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded border transition-colors ${
             chatOpen
               ? 'border-accent bg-accent/20 text-accent-light'
@@ -171,6 +174,7 @@ export default function TopBar() {
         <button
           onClick={handleVibeCompile}
           disabled={vibeLoading}
+          title="Compile all vibe specs into working code"
           className="flex items-center gap-1.5 text-xs px-3 py-1 rounded bg-accent hover:bg-accent/80 disabled:opacity-60 text-white font-medium transition-colors"
         >
           {vibeLoading ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}

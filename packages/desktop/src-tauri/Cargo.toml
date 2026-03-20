@@ -1,12 +1,12 @@
 [package]
-name = "vibe-studio"
+name = "vibestudio"
 version = "0.1.0"
-description = "Vibe Studio — vibe-first desktop editor"
+description = "VibeStudio — spec-first desktop editor"
 authors = ["VibeHub"]
 edition = "2021"
 
 [lib]
-name = "vibe_studio_lib"
+name = "vibestudio_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -21,6 +21,7 @@ tokio = { version = "1", features = ["full"] }
 walkdir = "2"
 git2 = "0.19"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+open = "5"
 
 [profile.dev]
 debug = 1          # line tables only (not full DWARF) — ~50% smaller debug builds

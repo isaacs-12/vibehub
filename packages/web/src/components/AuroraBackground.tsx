@@ -214,7 +214,7 @@ export default function AuroraBackground() {
       lastTime = now;
       time += dt;
 
-      if (!ssCtx || !ssCanvas) {
+      if (!ssCtx || !ssCanvas || !ctx || !canvas) {
         animationId = requestAnimationFrame(animate);
         return;
       }

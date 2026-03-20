@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { Loader2, CheckCircle2, XCircle, Cpu, FileCode, Wrench, TestTube2 } from 'lucide-react';
+import { Loader2, CheckCircle2, XCircle, Cpu, FileCode, Wrench, TestTube2, Clock, Timer } from 'lucide-react';
+
+const COMPILE_BUDGET_S = 12 * 60; // 12 minutes — matches agent budget
 
 interface CompileJobEvent {
   type: string;
@@ -23,10 +25,19 @@ interface Props {
   initialStatus: string;
 }
 
+function formatElapsed(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
 export default function CompileProgress({ jobId, initialStatus }: Props) {
   const [status, setStatus] = useState(initialStatus);
   const [events, setEvents] = useState<CompileJobEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [startedAt, setStartedAt] = useState<string | null>(null);
+  const [completedAt, setCompletedAt] = useState<string | null>(null);
+  const [elapsed, setElapsed] = useState(0);
   const eventCountRef = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -37,6 +48,8 @@ export default function CompileProgress({ jobId, initialStatus }: Props) {
       const data: StatusResponse = await res.json();
       setStatus(data.status);
       setError(data.error);
+      if (data.startedAt) setStartedAt(data.startedAt);
+      if (data.completedAt) setCompletedAt(data.completedAt);
       if (data.events.length > 0) {
         setEvents((prev) => [...prev, ...data.events]);
         eventCountRef.current = data.eventCount;
@@ -56,12 +69,36 @@ export default function CompileProgress({ jobId, initialStatus }: Props) {
     return () => clearInterval(interval);
   }, [status, poll]);
 
+  // Elapsed timer — ticks every second while running
+  useEffect(() => {
+    if (!startedAt) return;
+
+    const start = new Date(startedAt).getTime();
+
+    if (completedAt) {
+      setElapsed(Math.floor((new Date(completedAt).getTime() - start) / 1000));
+      return;
+    }
+
+    if (status === 'completed' || status === 'failed') return;
+
+    const tick = () => setElapsed(Math.floor((Date.now() - start) / 1000));
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [startedAt, completedAt, status]);
+
   // Auto-scroll to bottom when new events arrive
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [events.length]);
 
   if (status === 'completed' && events.length === 0) return null;
+
+  const remaining = COMPILE_BUDGET_S - elapsed;
+  const budgetPct = Math.min(100, (elapsed / COMPILE_BUDGET_S) * 100);
+  const isRunning = status === 'running';
+  const isTimedOut = error?.toLowerCase().includes('timed out');
 
   return (
     <div className="border border-border rounded-lg overflow-hidden">
@@ -88,11 +125,51 @@ export default function CompileProgress({ jobId, initialStatus }: Props) {
         {status === 'failed' && (
           <>
             <XCircle size={14} className="text-red-400" />
-            <span className="text-red-400 font-medium">Compilation failed</span>
-            {error && <span className="text-xs text-fg-muted ml-2">{error}</span>}
+            <span className="text-red-400 font-medium">
+              {isTimedOut ? 'Compilation timed out' : 'Compilation failed'}
+            </span>
           </>
         )}
+
+        {/* Timer — shown when started */}
+        {startedAt && (
+          <span className="ml-auto flex items-center gap-1.5 text-xs text-fg-subtle tabular-nums">
+            <Clock size={12} />
+            {formatElapsed(elapsed)}
+            {isRunning && remaining > 0 && (
+              <span className="text-fg-muted">/ {formatElapsed(COMPILE_BUDGET_S)}</span>
+            )}
+          </span>
+        )}
       </div>
+
+      {/* Progress bar — visible while running */}
+      {isRunning && startedAt && (
+        <div className="h-1 bg-canvas-subtle">
+          <div
+            className={`h-full transition-all duration-1000 ease-linear ${
+              budgetPct > 80 ? 'bg-yellow-400' : 'bg-accent-emphasis'
+            }`}
+            style={{ width: `${budgetPct}%` }}
+          />
+        </div>
+      )}
+
+      {/* Timeout explanation */}
+      {isTimedOut && (
+        <div className="px-4 py-2 bg-red-950/20 border-b border-border text-xs text-red-300">
+          <Timer size={11} className="inline mr-1.5 -mt-0.5" />
+          Compilation exceeded the 12-minute time limit.
+          {events.length > 0 && ' Partial results from completed features may still be available.'}
+        </div>
+      )}
+
+      {/* Error detail (non-timeout) */}
+      {error && !isTimedOut && (
+        <div className="px-4 py-2 bg-red-950/20 border-b border-border text-xs text-red-300">
+          {error}
+        </div>
+      )}
 
       {/* Event log */}
       {events.length > 0 && (

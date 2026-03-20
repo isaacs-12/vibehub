@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getStore } from '@/lib/data/store';
 import type { CompileJob } from '@/lib/data/store';
+import { COMPILE_LIMITS } from '@/lib/data/store';
 import { requireAuth, isAuthError, requireOwnership, requireReadAccess } from '@/lib/auth-middleware';
 import { resolveCompileModel } from '@/lib/resolve-compile-model';
 
@@ -90,6 +91,18 @@ export async function POST(request: Request, { params }: Params) {
 
   // Resolve which model/key to use based on the user's preferences
   const resolved = await resolveCompileModel(user.id);
+
+  // Per-user concurrency limit — reject if already at max active jobs
+  const activeJobs = await store.countActiveJobsForUser(user.id);
+  const limit = resolved.keySource === 'user'
+    ? COMPILE_LIMITS.user
+    : COMPILE_LIMITS.platform;
+  if (activeJobs >= limit) {
+    return NextResponse.json(
+      { error: `Compile limit reached (${activeJobs}/${limit} active). Wait for a current compile to finish.` },
+      { status: 429 },
+    );
+  }
 
   // Enqueue a cloud compile job so the agent can produce robust implementation proofs.
   const job: CompileJob = {

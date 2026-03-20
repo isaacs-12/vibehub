@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef } from 'react';
+import AuroraBackground from '@/components/AuroraBackground';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
@@ -68,7 +69,9 @@ export default function HomePage() {
   }
 
   return (
-    <div className="mx-auto max-w-screen-lg px-4">
+    <>
+      <AuroraBackground />
+      <div className="mx-auto max-w-screen-lg px-4">
       {/* ── Hero ── */}
       <section className="py-20 text-center">
         <h1 className="text-5xl font-bold text-fg leading-tight">
@@ -222,6 +225,7 @@ export default function HomePage() {
         </div>
       </section>
     </div>
+    </>
   );
 }
 

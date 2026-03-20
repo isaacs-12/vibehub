@@ -48,6 +48,7 @@ const PHASE2_MAX_ITERATIONS = 25;
 const COMMAND_TIMEOUT_MS = 120_000;
 const MAX_TOKENS = 32_768;
 const THINKING_BUDGET = 10_000;
+const COMPILE_BUDGET_MS = 12 * 60 * 1000; // 12 minutes wall-clock (leaves 3min buffer before 15min timeout)
 
 const ALLOWED_COMMAND_PREFIXES = [
   'tsc', 'npx tsc', 'npx eslint', 'node', 'npm test', 'npm run', 'npx jest',
@@ -372,6 +373,8 @@ export async function runCompileJob(
     ? genProvider
     : createProvider(valModel, apiKey);
 
+  const deadline = Date.now() + COMPILE_BUDGET_MS;
+
   const featureNodes: FeatureNode[] = headFeatures.map(({ path: p, content }) => ({
     slug: p.replace(/^\.vibe[/\\]features[/\\]/, '').replace(/\.md$/, ''),
     path: p,
@@ -415,6 +418,13 @@ export async function runCompileJob(
       const feature = sorted[idx];
       const isFirst = idx === 0;
 
+      // Check wall-clock budget before starting each feature
+      if (Date.now() > deadline) {
+        console.warn(`[agent] compile budget exceeded after ${idx}/${sorted.length} features`);
+        onProgress({ type: 'compile_done', totalFiles: allGeneratedFiles.size, features: idx });
+        break;
+      }
+
       onProgress({ type: 'feature_start', slug: feature.slug, index: idx, total: sorted.length });
 
       // Build context for this feature.
@@ -436,7 +446,7 @@ export async function runCompileJob(
       onProgress({ type: 'phase1_start', slug: feature.slug });
 
       const generated = await agenticGenerate(
-        genProvider, workspace, vibeContext, neverBlock, upstreamContext, isFirst, feature.slug, onProgress,
+        genProvider, workspace, vibeContext, neverBlock, upstreamContext, isFirst, feature.slug, onProgress, deadline,
       );
 
       for (const { path: p, content } of generated) {
@@ -444,11 +454,18 @@ export async function runCompileJob(
       }
       onProgress({ type: 'phase1_done', slug: feature.slug, fileCount: generated.length });
 
+      // Check budget between phases
+      if (Date.now() > deadline) {
+        console.warn(`[agent] compile budget exceeded after phase 1 of ${feature.slug}`);
+        onProgress({ type: 'feature_done', slug: feature.slug, fileCount: allGeneratedFiles.size });
+        break;
+      }
+
       // ── Phase 2: Agentic validation (fast model) ──
       onProgress({ type: 'phase2_start', slug: feature.slug });
 
       const validated = await validationLoop(
-        valProvider, workspace, vibeContext, generated, neverBlock, upstreamContext, feature.slug, onProgress,
+        valProvider, workspace, vibeContext, generated, neverBlock, upstreamContext, feature.slug, onProgress, deadline,
       );
 
       for (const { path: p, content } of validated) {
@@ -633,6 +650,7 @@ async function agenticGenerate(
   isFirstFeature: boolean,
   slug: string,
   onProgress: OnProgress,
+  deadline: number,
 ): Promise<CodeFile[]> {
   const writtenFiles = new Map<string, string>();
 
@@ -662,6 +680,8 @@ Start by exploring the workspace with list_files to understand what already exis
   ];
 
   for (let i = 0; i < PHASE1_MAX_ITERATIONS; i++) {
+    if (Date.now() > deadline) break;
+
     const response = await provider.createMessage(GENERATION_SYSTEM_PROMPT, messages, GENERATION_TOOLS);
     messages.push({ role: 'assistant', content: response.content });
 
@@ -827,6 +847,7 @@ async function validationLoop(
   upstreamContext: string,
   slug: string,
   onProgress: OnProgress,
+  deadline: number,
 ): Promise<CodeFile[]> {
   const writtenFiles = new Map<string, string>(
     generatedFiles.map(({ path: p, content }) => [p, content]),
@@ -860,6 +881,8 @@ Validate this implementation:
   ];
 
   for (let i = 0; i < PHASE2_MAX_ITERATIONS; i++) {
+    if (Date.now() > deadline) break;
+
     const response = await provider.createMessage(VALIDATION_SYSTEM_PROMPT, messages, VALIDATION_TOOLS);
     messages.push({ role: 'assistant', content: response.content });
 

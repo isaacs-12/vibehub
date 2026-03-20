@@ -208,7 +208,24 @@ export interface Store {
   appendCompileJobEvents(id: string, events: CompileJobEvent[]): Promise<void>;
   /** Get a compile job by ID. */
   getCompileJob(id: string): Promise<CompileJob | null>;
+  /** Count active (pending + running) compile jobs for a user. */
+  countActiveJobsForUser(userId: string): Promise<number>;
+  /** Find running jobs that started before the given cutoff (for zombie reaping). */
+  findStaleRunningJobs(startedBefore: string): Promise<CompileJob[]>;
 }
+
+// ─── Compile concurrency limits ───────────────────────────────────────────────
+
+/** Max concurrent compiles per user by key source. */
+export const COMPILE_LIMITS = {
+  /** Free tier: platform API key. */
+  platform: 1,
+  /** BYOK tier: user's own API key. */
+  user: 3,
+} as const;
+
+/** How long a running job can stay alive before being reaped (ms). */
+export const JOB_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
 
 // ─── File store (local dev) ───────────────────────────────────────────────────
 
@@ -575,6 +592,18 @@ class FileStore implements Store {
   async getCompileJob(id: string): Promise<CompileJob | null> {
     return readFile().compileJobs.find((j) => j.id === id) ?? null;
   }
+
+  async countActiveJobsForUser(userId: string): Promise<number> {
+    return readFile().compileJobs.filter(
+      (j) => j.userId === userId && (j.status === 'pending' || j.status === 'running'),
+    ).length;
+  }
+
+  async findStaleRunningJobs(startedBefore: string): Promise<CompileJob[]> {
+    return readFile().compileJobs.filter(
+      (j) => j.status === 'running' && j.startedAt && j.startedAt < startedBefore,
+    );
+  }
 }
 
 // ─── Postgres store (production) ──────────────────────────────────────────────
@@ -771,6 +800,8 @@ class PostgresStore implements Store {
   async updateCompileJob(_id: string, _updates: Partial<Pick<CompileJob, 'status' | 'startedAt' | 'completedAt' | 'error'>>): Promise<void> { /* TODO */ }
   async appendCompileJobEvents(_id: string, _events: CompileJobEvent[]): Promise<void> { /* TODO */ }
   async getCompileJob(_id: string): Promise<CompileJob | null> { return null; }
+  async countActiveJobsForUser(_userId: string): Promise<number> { return 0; }
+  async findStaleRunningJobs(_startedBefore: string): Promise<CompileJob[]> { return []; }
 }
 
 // ─── Singleton factory ────────────────────────────────────────────────────────

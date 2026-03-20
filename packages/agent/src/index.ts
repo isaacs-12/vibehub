@@ -140,6 +140,31 @@ function decryptApiKey(encrypted: string): string {
   return decrypted;
 }
 
+const JOB_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes — must match web backend
+const REAP_INTERVAL_MS = 60_000; // check for zombies every 60s
+let lastReapTime = 0;
+
+async function reapZombieJobs() {
+  const now = Date.now();
+  if (now - lastReapTime < REAP_INTERVAL_MS) return;
+  lastReapTime = now;
+
+  try {
+    const cutoff = new Date(now - JOB_TIMEOUT_MS).toISOString();
+    const res = await fetch(`${API_URL}/api/agent/jobs/reap`, {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({ startedBefore: cutoff }),
+    });
+    if (res.ok) {
+      const { reaped } = await res.json() as { reaped: number };
+      if (reaped > 0) console.log(`[agent] reaped ${reaped} zombie job(s)`);
+    }
+  } catch (err) {
+    console.error('[agent] reap error:', err);
+  }
+}
+
 async function main() {
   // Cloud Run requires a listening port for health checks
   http.createServer((_req, res) => { res.writeHead(200); res.end('ok'); }).listen(PORT, () => {
@@ -149,6 +174,7 @@ async function main() {
   console.log(`[agent] starting — polling ${API_URL} every ${POLL_INTERVAL_MS}ms`);
   while (true) {
     try {
+      await reapZombieJobs();
       await pollOnce();
     } catch (err) {
       console.error('[agent] poll error:', err);

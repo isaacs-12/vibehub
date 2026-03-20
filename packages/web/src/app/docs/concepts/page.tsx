@@ -31,6 +31,11 @@ export default function ConceptsPage() {
               definition:
                 'Hard constraints the compiler must respect. These are treated as invariants during code generation.',
             },
+            {
+              term: 'Connects',
+              definition:
+                'External integrations this feature depends on (e.g., Stripe, Google Sheets). References integration specs in .vibe/integrations/. VibeStudio can generate these for you.',
+            },
           ]}
         />
         <p>
@@ -74,10 +79,51 @@ export default function ConceptsPage() {
             {
               term: 'remote.json',
               definition:
-                'Remote connection config (owner, repo, web URL). Created by vibe clone.',
+                'Remote connection config — links this local project to a VibeHub project for push/pull. See Remote Config below.',
             },
           ]}
         />
+      </Section>
+
+      <Section title="Remote Config">
+        <p>
+          The <Code>.vibe/remote.json</Code> file links a local project to its
+          VibeHub counterpart. It&apos;s what enables push and pull between your
+          machine and the web.
+        </p>
+        <CodeBlock>{`{
+  "owner": "your-handle",
+  "repo": "my-project",
+  "webUrl": "https://getvibehub.com"
+}`}</CodeBlock>
+        <p>
+          <strong className="text-fg">How it gets created:</strong>
+        </p>
+        <ul className="list-disc list-inside space-y-1 text-sm text-fg-muted">
+          <li>
+            <strong className="text-fg">vibe clone</strong> &mdash; automatically
+            created with the correct owner, repo, and web URL.
+          </li>
+          <li>
+            <strong className="text-fg">VibeStudio</strong> &mdash; created when
+            you connect an existing local project to a VibeHub project through
+            the app.
+          </li>
+          <li>
+            <strong className="text-fg">Manually</strong> &mdash; you can create
+            this file yourself if you initialized with{' '}
+            <Code>vibe init</Code> and later created a matching project on
+            VibeHub. Just set <Code>owner</Code> to your VibeHub handle and{' '}
+            <Code>repo</Code> to the project name.
+          </li>
+        </ul>
+        <p>
+          The <Code>owner</Code> field must match the authenticated user when
+          pushing. The server rejects writes where the bearer token&apos;s user
+          doesn&apos;t match the project owner &mdash; editing{' '}
+          <Code>remote.json</Code> to point at someone else&apos;s project
+          won&apos;t grant write access.
+        </p>
       </Section>
 
       <Section title="Compilation">
@@ -195,6 +241,14 @@ function Code({ children }: { children: React.ReactNode }) {
     <code className="px-1.5 py-0.5 bg-canvas-subtle border border-border rounded text-xs text-accent-emphasis">
       {children}
     </code>
+  );
+}
+
+function CodeBlock({ children }: { children: React.ReactNode }) {
+  return (
+    <pre className="bg-canvas-inset border border-border rounded-lg p-4 text-xs text-fg overflow-x-auto">
+      <code>{children}</code>
+    </pre>
   );
 }
 

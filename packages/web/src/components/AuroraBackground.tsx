@@ -3,11 +3,12 @@
 import { useEffect, useRef } from 'react';
 
 /**
- * Animated purple aurora background.
- * No CSS blur — all softness comes from very large radial gradients
- * with many stops and a smooth falloff curve. This avoids the color
- * banding that CSS filter: blur() introduces.
+ * Soft purple aurora ribbons (canvas, no CSS blur).
+ * Rendered at 2× internal resolution and scaled down — averages quantized
+ * steps so gradients read smooth on 8-bit displays.
  */
+
+const SUPER_SAMPLE = 2;
 
 interface Blob {
   x: number;
@@ -15,10 +16,14 @@ interface Blob {
   vx: number;
   vy: number;
   baseRadius: number;
+  stretchX: number;
+  stretchY: number;
   color: [number, number, number];
   opacity: number;
   angle: number;
   angleSpeed: number;
+  ribbonRotation: number;
+  ribbonSpin: number;
   phase: number;
 }
 
@@ -26,11 +31,11 @@ function lerp(a: number, b: number, t: number) {
   return a + (b - a) * t;
 }
 
-// Attempt smooth Gaussian-like falloff
 function gaussianFalloff(t: number): number {
-  // Attempt approximation of gaussian: e^(-3t^2)
-  return Math.exp(-3 * t * t);
+  return Math.exp(-2.85 * t * t);
 }
+
+const GRADIENT_STOPS = 72;
 
 export default function AuroraBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -45,9 +50,10 @@ export default function AuroraBackground() {
     let animationId: number;
     let width = 0;
     let height = 0;
+    let ssCanvas: HTMLCanvasElement | null = null;
+    let ssCtx: CanvasRenderingContext2D | null = null;
 
     function resize() {
-      // Use full device pixel ratio for crisp rendering
       const dpr = window.devicePixelRatio || 1;
       width = window.innerWidth;
       height = window.innerHeight;
@@ -56,6 +62,19 @@ export default function AuroraBackground() {
       canvas!.style.width = `${width}px`;
       canvas!.style.height = `${height}px`;
       ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      const ss = document.createElement('canvas');
+      ss.width = Math.round(width * dpr * SUPER_SAMPLE);
+      ss.height = Math.round(height * dpr * SUPER_SAMPLE);
+      const sctx = ss.getContext('2d', { alpha: true });
+      if (!sctx) {
+        ssCanvas = null;
+        ssCtx = null;
+        return;
+      }
+      sctx.setTransform(dpr * SUPER_SAMPLE, 0, 0, dpr * SUPER_SAMPLE, 0, 0);
+      ssCanvas = ss;
+      ssCtx = sctx;
     }
 
     resize();
@@ -63,79 +82,70 @@ export default function AuroraBackground() {
 
     const dim = Math.max(width, height);
 
-    // Make radii very large so the gradients are inherently soft — no blur needed
     const blobs: Blob[] = [
       {
-        x: width * 0.15, y: height * 0.25,
-        vx: 0, vy: 0,
-        baseRadius: dim * 0.55,
+        x: width * 0.2,
+        y: height * 0.2,
+        vx: 0,
+        vy: 0,
+        baseRadius: dim * 0.42,
+        stretchX: 2.2,
+        stretchY: 0.38,
         color: [124, 58, 237],
-        opacity: 0.12,
-        angle: 0, angleSpeed: 0.0004,
+        opacity: 0.055,
+        angle: 0,
+        angleSpeed: 0.00055,
+        ribbonRotation: 0.35,
+        ribbonSpin: 0.00012,
         phase: 0,
       },
       {
-        x: width * 0.8, y: height * 0.15,
-        vx: 0, vy: 0,
-        baseRadius: dim * 0.5,
-        color: [139, 92, 246],
-        opacity: 0.09,
-        angle: Math.PI * 0.7, angleSpeed: 0.00035,
-        phase: 1.2,
-      },
-      {
-        x: width * 0.5, y: height * 0.75,
-        vx: 0, vy: 0,
-        baseRadius: dim * 0.52,
-        color: [109, 40, 217],
-        opacity: 0.1,
-        angle: Math.PI * 1.3, angleSpeed: 0.00045,
-        phase: 2.5,
-      },
-      {
-        x: width * 0.3, y: height * 0.1,
-        vx: 0, vy: 0,
-        baseRadius: dim * 0.35,
-        color: [167, 139, 250],
-        opacity: 0.07,
-        angle: Math.PI * 0.4, angleSpeed: 0.0005,
-        phase: 3.8,
-      },
-      {
-        x: width * 0.85, y: height * 0.6,
-        vx: 0, vy: 0,
+        x: width * 0.85,
+        y: height * 0.25,
+        vx: 0,
+        vy: 0,
         baseRadius: dim * 0.38,
-        color: [91, 33, 182],
-        opacity: 0.08,
-        angle: Math.PI * 1.8, angleSpeed: 0.00038,
-        phase: 5.1,
+        stretchX: 2.0,
+        stretchY: 0.42,
+        color: [139, 92, 246],
+        opacity: 0.048,
+        angle: Math.PI * 0.8,
+        angleSpeed: 0.00048,
+        ribbonRotation: -0.5,
+        ribbonSpin: -0.0001,
+        phase: 2.1,
       },
       {
-        x: width * 0.55, y: height * 0.4,
-        vx: 0, vy: 0,
-        baseRadius: dim * 0.42,
-        color: [99, 102, 241],
-        opacity: 0.06,
-        angle: Math.PI * 2.2, angleSpeed: 0.0003,
-        phase: 6.3,
+        x: width * 0.45,
+        y: height * 0.72,
+        vx: 0,
+        vy: 0,
+        baseRadius: dim * 0.4,
+        stretchX: 2.4,
+        stretchY: 0.35,
+        color: [109, 40, 217],
+        opacity: 0.05,
+        angle: Math.PI * 1.4,
+        angleSpeed: 0.00062,
+        ribbonRotation: 1.1,
+        ribbonSpin: 0.00014,
+        phase: 4.2,
       },
       {
-        x: width * 0.1, y: height * 0.7,
-        vx: 0, vy: 0,
-        baseRadius: dim * 0.32,
-        color: [147, 51, 234],
-        opacity: 0.07,
-        angle: Math.PI * 0.9, angleSpeed: 0.00055,
-        phase: 7.7,
-      },
-      {
-        x: width * 0.65, y: height * 0.05,
-        vx: 0, vy: 0,
+        x: width * 0.55,
+        y: height * 0.48,
+        vx: 0,
+        vy: 0,
         baseRadius: dim * 0.28,
-        color: [124, 58, 237],
-        opacity: 0.06,
-        angle: Math.PI * 1.6, angleSpeed: 0.0006,
-        phase: 8.9,
+        stretchX: 1.7,
+        stretchY: 0.48,
+        color: [167, 139, 250],
+        opacity: 0.038,
+        angle: Math.PI * 0.3,
+        angleSpeed: 0.0007,
+        ribbonRotation: 0.9,
+        ribbonSpin: -0.00018,
+        phase: 6.0,
       },
     ];
 
@@ -143,54 +153,58 @@ export default function AuroraBackground() {
 
     function updateBlob(blob: Blob, dt: number) {
       blob.angle += blob.angleSpeed * dt;
+      blob.ribbonRotation += blob.ribbonSpin * dt;
 
       const t = time * 0.0001;
-      const wobble1 = Math.sin(t * 1.7 + blob.phase) * 0.5;
-      const wobble2 = Math.sin(t * 0.8 + blob.phase * 1.3) * 0.3;
-      const wobble3 = Math.cos(t * 2.3 + blob.phase * 0.7) * 0.2;
+      const wobble1 = Math.sin(t * 1.7 + blob.phase) * 0.55;
+      const wobble2 = Math.sin(t * 0.85 + blob.phase * 1.3) * 0.32;
+      const wobble3 = Math.cos(t * 2.1 + blob.phase * 0.7) * 0.22;
 
-      const speed = 0.4;
+      const speed = 0.72;
       const targetVx = Math.cos(blob.angle + wobble1 + wobble2) * speed;
       const targetVy = Math.sin(blob.angle + wobble1 + wobble3) * speed;
 
-      blob.vx = lerp(blob.vx, targetVx, 0.015);
-      blob.vy = lerp(blob.vy, targetVy, 0.015);
+      blob.vx = lerp(blob.vx, targetVx, 0.022);
+      blob.vy = lerp(blob.vy, targetVy, 0.022);
 
-      blob.x += blob.vx * dt * 0.08;
-      blob.y += blob.vy * dt * 0.08;
+      blob.x += blob.vx * dt * 0.11;
+      blob.y += blob.vy * dt * 0.11;
 
-      const margin = blob.baseRadius * 0.3;
-      const pushStrength = 0.015;
+      const margin = blob.baseRadius * blob.stretchX * 0.35;
+      const pushStrength = 0.018;
       if (blob.x < -margin) blob.angle = lerp(blob.angle, 0, pushStrength);
       if (blob.x > width + margin) blob.angle = lerp(blob.angle, Math.PI, pushStrength);
       if (blob.y < -margin) blob.angle = lerp(blob.angle, Math.PI / 2, pushStrength);
       if (blob.y > height + margin) blob.angle = lerp(blob.angle, -Math.PI / 2, pushStrength);
     }
 
-    function drawBlob(blob: Blob) {
-      // Breathing radius
+    function drawBlob(blob: Blob, c: CanvasRenderingContext2D) {
       const t = time * 0.0001;
-      const breathe = 1 + Math.sin(t * 1.1 + blob.phase) * 0.08;
+      const breathe = 1 + Math.sin(t * 1.05 + blob.phase) * 0.06;
       const radius = blob.baseRadius * breathe;
+      const wobbleRot =
+        Math.sin(t * 0.9 + blob.phase) * 0.25 + Math.cos(t * 0.45 + blob.phase * 1.2) * 0.12;
+      const rot = blob.ribbonRotation + wobbleRot;
 
-      const gradient = ctx!.createRadialGradient(
-        blob.x, blob.y, 0,
-        blob.x, blob.y, radius
-      );
       const [r, g, b] = blob.color;
 
-      // 48 stops with gaussian falloff — produces extremely smooth gradients
-      const STOPS = 48;
-      for (let i = 0; i <= STOPS; i++) {
-        const pos = i / STOPS;
+      c.save();
+      c.translate(blob.x, blob.y);
+      c.rotate(rot);
+      c.scale(blob.stretchX, blob.stretchY);
+
+      const gradient = c.createRadialGradient(-radius * 0.08, 0, 0, 0, 0, radius);
+      for (let i = 0; i <= GRADIENT_STOPS; i++) {
+        const pos = i / GRADIENT_STOPS;
         const alpha = blob.opacity * gaussianFalloff(pos);
         gradient.addColorStop(pos, `rgba(${r}, ${g}, ${b}, ${alpha})`);
       }
 
-      ctx!.fillStyle = gradient;
-      ctx!.beginPath();
-      ctx!.arc(blob.x, blob.y, radius, 0, Math.PI * 2);
-      ctx!.fill();
+      c.fillStyle = gradient;
+      c.beginPath();
+      c.arc(0, 0, radius, 0, Math.PI * 2);
+      c.fill();
+      c.restore();
     }
 
     let lastTime = performance.now();
@@ -200,15 +214,29 @@ export default function AuroraBackground() {
       lastTime = now;
       time += dt;
 
-      ctx!.clearRect(0, 0, width, height);
-      ctx!.globalCompositeOperation = 'lighter';
+      if (!ssCtx || !ssCanvas) {
+        animationId = requestAnimationFrame(animate);
+        return;
+      }
+
+      ssCtx.clearRect(0, 0, width, height);
+      ssCtx.globalCompositeOperation = 'lighter';
 
       for (const blob of blobs) {
         updateBlob(blob, dt);
-        drawBlob(blob);
+        drawBlob(blob, ssCtx);
       }
 
-      ctx!.globalCompositeOperation = 'source-over';
+      ssCtx.globalCompositeOperation = 'source-over';
+
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(ssCanvas, 0, 0, ssCanvas.width, ssCanvas.height, 0, 0, canvas.width, canvas.height);
+      ctx.restore();
+
       animationId = requestAnimationFrame(animate);
     }
 

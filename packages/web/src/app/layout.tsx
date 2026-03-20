@@ -3,6 +3,7 @@ import Script from 'next/script';
 import './globals.css';
 import NavBar from '@/components/NavBar/NavBar';
 import AuthProvider from '@/components/AuthProvider';
+import AuroraBackground from '@/components/AuroraBackground';
 
 export const metadata: Metadata = {
   title: 'VibeHub',
@@ -25,9 +26,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body className="min-h-screen bg-canvas">
         <AuthProvider>
+          <AuroraBackground />
           <NavBar />
-          <main>{children}</main>
-          <footer className="border-t border-border py-6 mt-16">
+          <main className="relative z-10">{children}</main>
+          <footer className="relative z-10 border-t border-border py-6 mt-16">
             <div className="mx-auto max-w-screen-xl px-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-fg-muted">
               <span>&copy; {new Date().getFullYear()} VibeHub</span>
               <div className="flex items-center gap-4">

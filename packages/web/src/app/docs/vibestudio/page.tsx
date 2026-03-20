@@ -15,7 +15,7 @@ export default function VibeStudioPage() {
         </p>
         <Callout>
           VibeStudio is currently in development. Desktop downloads will be
-          available soon. You can build from source in the meantime.
+          available soon.
         </Callout>
       </Section>
 
@@ -46,47 +46,65 @@ export default function VibeStudioPage() {
         />
       </Section>
 
-      <Section title="Building from Source">
+      <Section title="Download">
+        <Callout>
+          Desktop downloads for macOS, Windows, and Linux are coming soon. Check
+          back here for direct download links.
+        </Callout>
+        {/* Build-from-source instructions will be added once the repo is public. */}
+      </Section>
+
+      <Section title="Authentication">
         <p>
-          VibeStudio requires{' '}
-          <a
-            href="https://tauri.app/start/prerequisites/"
-            className="text-accent-emphasis hover:underline"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Tauri prerequisites
-          </a>{' '}
-          (Rust, system dependencies) plus Node.js.
+          VibeStudio uses a secure OAuth flow to connect to your VibeHub
+          account:
         </p>
-        <CodeBlock>{`git clone https://github.com/isaacs-12/vibehub.git
-cd vibehub/packages/desktop
-npm install
-npm run tauri dev`}</CodeBlock>
+        <ol className="list-decimal list-inside space-y-2 text-sm text-fg-muted">
+          <li>
+            Click <strong className="text-fg">Sign in</strong> in VibeStudio
+            &mdash; this opens your system browser.
+          </li>
+          <li>
+            Authenticate with Google OAuth on getvibehub.com (VibeStudio uses
+            its own OAuth client, separate from the web app).
+          </li>
+          <li>
+            After login, the browser redirects to a{' '}
+            <Code>vibehub://auth?token=...</Code> deep link, which hands a
+            secure bearer token back to VibeStudio.
+          </li>
+          <li>
+            VibeStudio validates the token with the server and stores it
+            locally. On future launches, the token is re-validated automatically.
+          </li>
+        </ol>
         <p>
-          For a production build:
-        </p>
-        <CodeBlock>{`npm run tauri build`}</CodeBlock>
-        <p>
-          The built app will be in{' '}
-          <Code>packages/desktop/src-tauri/target/release/bundle/</Code>.
+          The bearer token is used for all API requests (push, pull, compile).
+          The server enforces ownership on every write &mdash; you can only push
+          to projects you own. Tokens expire and can be revoked by signing out.
         </p>
       </Section>
 
-      <Section title="Connecting to VibeHub">
+      <Section title="Local Config">
         <p>
-          On first launch, VibeStudio will prompt you to sign in. This opens
-          your browser for Google OAuth, then redirects back to the app.
-        </p>
-        <p>
-          Once signed in, you can clone any project you have access to. The
-          connection config is stored in <Code>.vibe/remote.json</Code>:
+          Each project&apos;s connection to VibeHub is stored in{' '}
+          <Code>.vibe/remote.json</Code>:
         </p>
         <CodeBlock>{`{
   "owner": "your-handle",
   "repo": "my-project",
   "webUrl": "https://getvibehub.com"
 }`}</CodeBlock>
+        <p>
+          This file is created automatically when you clone a project or connect
+          an existing project to VibeHub. It tells VibeStudio (and the CLI)
+          where to push and pull specs.
+        </p>
+        <p>
+          The <Code>owner</Code> field must match your authenticated account.
+          The server rejects pushes where the token&apos;s user doesn&apos;t
+          match the project owner, preventing unauthorized modifications.
+        </p>
       </Section>
 
       <Section title="Workflow">

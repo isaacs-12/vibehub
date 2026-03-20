@@ -25,11 +25,8 @@ export default function GettingStartedPage() {
           syncs with VibeHub.
         </p>
         <CodeBlock>{`# macOS / Linux
-curl -fsSL https://getvibehub.com/install.sh | sh
-
-# Or build from source
-git clone https://github.com/isaacs-12/vibehub.git
-cd vibehub/packages/cli && go install .`}</CodeBlock>
+curl -fsSL https://getvibehub.com/install.sh | sh`}</CodeBlock>
+        {/* Build-from-source instructions will be added once the repo is public. */}
       </Section>
 
       <Section title="2. Initialize a project">
@@ -104,6 +101,40 @@ vibe compile`}</CodeBlock>
         </p>
       </Section>
 
+      <Section title="Local config files">
+        <p>
+          When you clone a project or connect VibeStudio to VibeHub, a few
+          local config files are created inside your <Code>.vibe/</Code>{' '}
+          directory:
+        </p>
+        <DefinitionList
+          items={[
+            {
+              term: 'remote.json',
+              definition:
+                'Stores the connection to VibeHub: your owner handle, repo name, and the web URL. Created automatically by vibe clone or when you connect VibeStudio.',
+            },
+            {
+              term: 'project.json',
+              definition:
+                'Build manifest — language, framework, and commands for install, dev, build, and test. Used by both the CLI compiler and VibeStudio.',
+            },
+            {
+              term: 'meta.json',
+              definition:
+                'Project name, creation date, and version. Created by vibe init.',
+            },
+          ]}
+        />
+        <p>
+          Authentication tokens for the desktop app are stored securely in your
+          system&apos;s local storage (managed by VibeStudio). The CLI uses{' '}
+          <Code>VIBEHUB_WEB_URL</Code> to know where to connect. All API
+          requests from the desktop app and CLI use bearer token authentication,
+          and the server verifies project ownership before allowing any writes.
+        </p>
+      </Section>
+
       <Section title="Next steps">
         <ul className="list-disc list-inside space-y-1 text-sm text-fg-muted">
           <li>
@@ -156,5 +187,18 @@ function CodeBlock({ children }: { children: React.ReactNode }) {
     <pre className="bg-canvas-inset border border-border rounded-lg p-4 text-xs text-fg overflow-x-auto">
       <code>{children}</code>
     </pre>
+  );
+}
+
+function DefinitionList({ items }: { items: { term: string; definition: string }[] }) {
+  return (
+    <dl className="space-y-2">
+      {items.map(({ term, definition }) => (
+        <div key={term} className="flex gap-2 text-sm">
+          <dt className="shrink-0 font-medium text-fg w-28">{term}</dt>
+          <dd className="text-fg-muted">{definition}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }

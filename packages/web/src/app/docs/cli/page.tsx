@@ -8,11 +8,8 @@ export default function CLIPage() {
 
       <Section title="Installation">
         <CodeBlock>{`# macOS / Linux
-curl -fsSL https://getvibehub.com/install.sh | sh
-
-# Build from source
-git clone https://github.com/isaacs-12/vibehub.git
-cd vibehub/packages/cli && go install .`}</CodeBlock>
+curl -fsSL https://getvibehub.com/install.sh | sh`}</CodeBlock>
+        {/* Build-from-source instructions will be added once the repo is public. */}
       </Section>
 
       <CommandSection

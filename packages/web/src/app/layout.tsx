@@ -27,6 +27,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <AuthProvider>
           <NavBar />
           <main>{children}</main>
+          <footer className="border-t border-border py-6 mt-16">
+            <div className="mx-auto max-w-screen-xl px-4 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-fg-muted">
+              <span>&copy; {new Date().getFullYear()} VibeHub</span>
+              <div className="flex items-center gap-4">
+                <a href="/privacy" className="hover:text-fg transition-colors">Privacy Policy</a>
+                <a href="/docs" className="hover:text-fg transition-colors">Docs</a>
+              </div>
+            </div>
+          </footer>
         </AuthProvider>
       </body>
     </html>

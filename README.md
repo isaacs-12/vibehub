@@ -48,13 +48,21 @@ vibe file edited
     │
     └─▶ [web] Describe a change → PR created → agent picks it up
                                                     │
-                                          Phase 1: single-shot generation
-                                          Phase 2: agentic loop
-                                                    ├─ write_file
-                                                    ├─ read_file
-                                                    ├─ run_command (tsc, npm test, ...)
-                                                    └─ finish (when clean)
+                                          resolve user model preferences
+                                          check concurrency limits
+                                          enqueue CompileJob
                                                     │
+                                          for each feature (in dependency order):
+                                            Phase 1: agentic generation (strong model)
+                                              ├─ list_files, read_file, search_files
+                                              ├─ write_file (implementation code)
+                                              └─ finish
+                                            Phase 2: agentic validation (fast model)
+                                              ├─ run_command (npm install, tsc, npm test)
+                                              ├─ edit_file / write_file (fix errors)
+                                              └─ finish (when build clean + tests pass)
+                                                    │
+                                          progress events streamed to frontend
                                           implementation proofs stored on PR
                                                     │
                                           3-way merge at spec level on apply
@@ -92,50 +100,60 @@ Conflict resolution on *intent*, not syntax. When both sides change the same fea
 
 ### `packages/agent` — the agentic compile loop
 
-Standalone Node.js polling worker. Calls `GET /api/agent/jobs/next` every 5 seconds, runs the compile job, patches the results back.
+Standalone Node.js polling worker. Calls `GET /api/agent/jobs/next` every 5 seconds, runs the compile job, patches the results back. Deploy multiple instances for horizontal scaling — the job queue handles concurrency.
 
-**Two-phase execution:**
+**Two-phase agentic execution:**
 
-```typescript
-// Phase 1: single-shot — fast initial generation
-const initial = await singleShotGenerate(provider, vibeContext);
-
-// Phase 2: agentic validation loop
-// Claude/Gemini has tools: write_file, read_file, run_command, finish
-// Iterates until finish() is called or MAX_ITERATIONS (10) hit
-const final = await agentLoop(provider, workspace, vibeContext, initial);
-```
-
-The agent reads `.vibe/project.json` to know which commands to run for validation:
+Features are compiled in dependency order (topological sort of the `Uses:` graph). For each feature:
 
 ```
-1. Read .vibe/project.json → find install, build, test commands
-2. Run install (npm install, pip install, etc.)
-3. Run build / type-check (npx tsc --noEmit, npm run build, ...)
-4. Run tests if a test command exists
-5. Fix errors with write_file, repeat from 3
-6. Call finish() with the final file list
+Phase 1 — Code Generation (strong model, up to 10 iterations)
+  Tools: write_file, read_file, list_files, search_files, finish
+  Goal: explore the workspace, understand upstream code, generate complete implementation
+
+Phase 2 — Validation & Fixing (fast model, up to 25 iterations)
+  Tools: write_file, edit_file, read_file, list_files, search_files, run_command, finish
+  Goal: install deps, build, typecheck, run tests, fix errors until clean
 ```
 
-`run_command` is sandboxed: only allowed prefixes (`tsc`, `npx`, `npm test`, `npm run`, `node`, `npx jest`, `npx eslint`), all file paths validated against `path.resolve` to stay within the temp workspace.
+Phase 1 uses a strong model for code generation and gets read-only + write tools (no shell access). Phase 2 uses a fast model for validation and gets full tool access including `run_command` and `edit_file` for targeted patches. This split optimizes both quality and cost.
+
+**Upstream context flow:** When compiling feature B that depends on feature A, the agent receives extracted headers (imports, exports, type definitions, function signatures) from A's generated files. This lets downstream features import from upstream code without redefinition.
+
+**Never constraints:** Each vibe file can declare `Never:` rules in its frontmatter. These are extracted and injected as hard constraints into every LLM call, enforced across both phases.
+
+**Sandboxing:** Each compile job runs in an isolated temp directory. `run_command` only allows whitelisted prefixes (`tsc`, `npx tsc`, `npx eslint`, `node`, `npm test`, `npm run`, `npx jest`, `npx vitest`, `npx prettier`, `cat`, `ls`, `find`, `head`, `tail`, `wc`). All file paths are validated against `path.resolve` to prevent traversal outside the workspace.
+
+**Model tiering and BYOK:**
+
+The agent supports two model tiers per job — a generation model (strong) and a validation model (fast). Model selection is per-user:
+
+- **Free tier:** Platform API keys, Gemini Flash Lite (generation) + Gemini Flash (validation). Concurrency limit: 1 active job.
+- **BYOK tier:** User's own API key (encrypted at rest with AES-256-CBC), any supported model. Concurrency limit: 3 active jobs.
+
+User model preferences are resolved at PR creation time and stored on the `CompileJob`. The agent decrypts BYOK keys at runtime using the shared `AUTH_SECRET`.
 
 **Provider abstraction:**
 
 ```typescript
 interface LLMProvider {
-  generateText(prompt: string): Promise<string>;
-  createMessage(messages: MessageParam[], tools: Tool[]): Promise<Response>;
+  readonly model: string;
+  createMessage(system: string, messages: MessageParam[], tools: Tool[]): Promise<{ content: ContentBlock[]; stop_reason: string }>;
 }
 ```
 
-`AnthropicProvider` and `GeminiProvider` implement this. Routing is determined by `AGENT_MODEL`:
+`AnthropicProvider` (Claude) and `GeminiProvider` (Gemini) implement this. The Gemini adapter translates Anthropic's tool-use message format (with call IDs) to Gemini's function calling format (name-based) at the SDK boundary. The canonical internal format is Anthropic's.
 
-```bash
-AGENT_MODEL=claude-sonnet-4-6        ANTHROPIC_API_KEY=...   # default
-AGENT_MODEL=gemini-2.5-flash-lite    GEMINI_API_KEY=...
-```
+**Real-time progress:**
 
-The Gemini adapter converts Anthropic's tool-use message format (with call IDs) to Gemini's function calling format (name-based, no IDs) at the SDK boundary. The canonical internal format is Anthropic's — Gemini content blocks are translated on the way in and out.
+The agent emits structured `CompileEvent`s (compile_start, feature_start, phase1_start, phase1_tool, phase2_iteration, compile_done, etc.) and buffers them every 2 seconds via `PATCH /api/agent/jobs/:id`. The frontend polls `GET /api/agent/jobs/:id/status?after=N` every 3 seconds for incremental updates, rendering a live event log with an elapsed timer and progress bar.
+
+**Scaling & reliability:**
+
+- **Per-user concurrency limits** at job creation (free: 1, BYOK: 3) — returns 429 when at capacity.
+- **12-minute wall-clock budget** per compile — the agent checks the deadline before each feature, between phases, and on each iteration. Gracefully stops and returns partial results.
+- **15-minute zombie reaper** — agent workers periodically call `POST /api/agent/jobs/reap` to mark stale running jobs as failed.
+- **Horizontal scaling** — deploy N agent instances pointing at the same `VIBEHUB_API_URL`. The `claimNextPendingJob` endpoint handles atomic job claiming.
 
 ### `packages/desktop` — Vibe Studio
 
@@ -205,9 +223,19 @@ make setup   # copies .env.example → .env, npm install, starts Docker stack, r
 Edit `.env`:
 
 ```bash
-GEMINI_API_KEY=...                   # required for desktop compile and CLI import
-ANTHROPIC_API_KEY=...                # optional — used if AGENT_MODEL starts with claude-
-AGENT_MODEL=gemini-2.5-flash-lite    # or: claude-sonnet-4-6, claude-haiku-4-5-20251001
+# Google OAuth (required for login)
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+AUTH_SECRET=...                      # openssl rand -base64 32
+
+# Model API keys — platform keys used for free-tier compiles
+GEMINI_API_KEY=...                   # required for desktop compile, CLI import, and free-tier agent
+ANTHROPIC_API_KEY=...                # optional — used when AGENT_MODEL starts with claude-
+
+# Agent defaults (used when job has no user model config)
+AGENT_MODEL=claude-sonnet-4-6       # generation model (or: gemini-2.5-flash, etc.)
+AGENT_FAST_MODEL=claude-haiku-4-5-20251001  # validation model (defaults to AGENT_MODEL)
+AGENT_SECRET=...                     # shared secret between web backend and agent worker
 ```
 
 ### Running
@@ -280,11 +308,15 @@ GitHub's PRs are code-level. You review diffs of files. VibeHub's PRs are spec-l
 
 ## What's interesting to work on
 
-- **Agentic loop reliability** (`packages/agent/src/agent.ts`) — making the validation loop reliably iterate to a passing state across diverse project types and error shapes. The current implementation works; making it robust across edge cases (package manager differences, missing tools, test timeouts) is an open problem.
+- **Agentic loop reliability** (`packages/agent/src/agent.ts`) — the two-phase loop with upstream context flow handles most cases well, but edge cases remain: package manager differences, missing system tools, flaky tests, and projects that need non-standard build steps.
 
 - **Spec merge quality** (`packages/web/src/lib/vibe-merge.ts`) — the current merge is file-level. A section-level or paragraph-level merge would reduce false conflicts and produce better AI-feathered results.
 
 - **Import from existing codebases** (`vibe import`) — extracting good specs from existing code is the hardest part of the onboarding story. The quality of extracted specs determines everything downstream.
+
+- **Tier 2/3 scaling** — the current architecture (polling workers, per-user limits, zombie reaping) handles moderate load. For production scale: dedicated job queues (Redis/SQS), workspace pooling, cost tracking per user, and priority queuing for BYOK users.
+
+- **Desktop compile visibility** — the desktop app uses a separate local Gemini compile pipeline. Bringing cloud compile progress (or vice versa) into the desktop would unify the experience.
 
 - **Deploy integrations** — the natural step after code generation is deployment. Vercel, Railway, and Render all have APIs. The `project.json` manifest already has `build` and `dev`; a `deploy` field is the obvious extension.
 

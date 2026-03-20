@@ -153,6 +153,7 @@ export interface Store {
 
   // Projects
   getProject(owner: string, repo: string): Promise<Project | null>;
+  getProjectById(id: string): Promise<Project | null>;
   listProjects(): Promise<Project[]>;
   upsertProject(p: Project): Promise<void>;
 
@@ -257,6 +258,10 @@ class FileStore implements Store {
     return readFile().projects.find(
       (p) => p.owner === owner && p.repo === repo,
     ) ?? null;
+  }
+
+  async getProjectById(id: string): Promise<Project | null> {
+    return readFile().projects.find((p) => p.id === id) ?? null;
   }
 
   async listProjects(): Promise<Project[]> {
@@ -582,6 +587,15 @@ class PostgresStore implements Store {
       .from(projects)
       .where(and(eq(projects.owner, owner), eq(projects.repo, repo)))
       .limit(1);
+    if (!row) return null;
+    return { ...row, description: row.description ?? '', visibility: (row.visibility ?? 'public') as Project['visibility'], starCount: row.starCount ?? 0, forkCount: row.forkCount ?? 0, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
+  }
+
+  async getProjectById(id: string): Promise<Project | null> {
+    const { eq } = await import('drizzle-orm');
+    const db = await this.db();
+    const { projects } = await this.schema();
+    const [row] = await db.select().from(projects).where(eq(projects.id, id)).limit(1);
     if (!row) return null;
     return { ...row, description: row.description ?? '', visibility: (row.visibility ?? 'public') as Project['visibility'], starCount: row.starCount ?? 0, forkCount: row.forkCount ?? 0, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
   }

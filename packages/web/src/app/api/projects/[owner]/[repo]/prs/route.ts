@@ -2,15 +2,20 @@ import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getStore } from '@/lib/data/store';
 import type { CompileJob } from '@/lib/data/store';
-import { requireAuth, isAuthError } from '@/lib/auth-middleware';
+import { requireAuth, isAuthError, requireOwnership, requireReadAccess } from '@/lib/auth-middleware';
 import { resolveCompileModel } from '@/lib/resolve-compile-model';
 
 interface Params { params: { owner: string; repo: string } }
 
 export async function GET(_req: Request, { params }: Params) {
-  const project = await getStore().getProject(params.owner, params.repo);
+  const store = getStore();
+  const project = await store.getProject(params.owner, params.repo);
   if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 });
-  const prs = await getStore().listPRs(project.id);
+
+  const denied = await requireReadAccess(_req, project);
+  if (denied) return denied;
+
+  const prs = await store.listPRs(project.id);
   return NextResponse.json(prs);
 }
 
@@ -21,6 +26,10 @@ export async function POST(request: Request, { params }: Params) {
 
   const project = await getStore().getProject(params.owner, params.repo);
   if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+
+  // Only the project owner can create PRs (push)
+  const ownerCheck = requireOwnership(user, project.owner);
+  if (ownerCheck) return ownerCheck;
 
   const body = await request.json().catch(() => null);
   if (!body?.title) return NextResponse.json({ error: 'title is required' }, { status: 400 });

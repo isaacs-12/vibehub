@@ -81,3 +81,42 @@ export async function requireAuth(req: Request): Promise<AuthUser | NextResponse
 export function isAuthError(result: AuthUser | NextResponse): result is NextResponse {
   return result instanceof NextResponse;
 }
+
+/**
+ * Check that the authenticated user owns the given project.
+ * Returns a 403 response if not, or null if the check passes.
+ */
+export function requireOwnership(
+  user: AuthUser,
+  projectOwner: string,
+): NextResponse | null {
+  if (user.handle !== projectOwner) {
+    return NextResponse.json(
+      { error: 'You do not have write access to this project' },
+      { status: 403 },
+    );
+  }
+  return null;
+}
+
+/**
+ * For private/unlisted projects, verify the requester has access.
+ * Public projects are always readable. Private projects require the owner.
+ * Unlisted projects are accessible to anyone with the URL (no check).
+ *
+ * Returns a 403/404 response if blocked, or null if access is allowed.
+ */
+export async function requireReadAccess(
+  req: Request,
+  project: { owner: string; visibility?: string },
+): Promise<NextResponse | null> {
+  const visibility = project.visibility ?? 'public';
+  if (visibility === 'public' || visibility === 'unlisted') return null;
+
+  // Private — only the owner can read
+  const user = await getAuthUser(req);
+  if (!user || user.handle !== project.owner) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+  return null;
+}

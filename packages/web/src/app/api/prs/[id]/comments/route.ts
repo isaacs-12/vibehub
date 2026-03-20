@@ -1,11 +1,25 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getStore } from '@/lib/data/store';
-import { requireAuth, isAuthError } from '@/lib/auth-middleware';
+import { requireAuth, isAuthError, requireReadAccess } from '@/lib/auth-middleware';
 
 interface Params { params: { id: string } }
 
+/** Resolve the project that owns a PR so we can check visibility. */
+async function getProjectForPR(prId: string) {
+  const store = getStore();
+  const pr = await store.getPR(prId);
+  if (!pr) return null;
+  return store.getProjectById(pr.projectId);
+}
+
 export async function GET(_req: Request, { params }: Params) {
+  const project = await getProjectForPR(params.id);
+  if (project) {
+    const denied = await requireReadAccess(_req, project);
+    if (denied) return denied;
+  }
+
   const comments = await getStore().listComments(params.id);
   return NextResponse.json(comments);
 }

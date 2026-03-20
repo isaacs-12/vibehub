@@ -1,41 +1,38 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
-import { ArrowRight, Loader2, Sparkles } from 'lucide-react';
-
-interface Project {
-  id: string;
-  owner: string;
-  repo: string;
-  description: string;
-  createdAt: string;
-}
+import {
+  ArrowRight,
+  Loader2,
+  Sparkles,
+  FileText,
+  Cpu,
+  GitPullRequest,
+  Download,
+  GitFork,
+  Users,
+  History,
+} from 'lucide-react';
 
 export default function HomePage() {
   const router = useRouter();
   const { data: session } = useSession();
   const [prompt, setPrompt] = useState('');
   const [creating, setCreating] = useState(false);
-  const [projects, setProjects] = useState<Project[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    fetch('/api/projects')
-      .then((r) => r.json())
-      .then((data) => Array.isArray(data) && setProjects(data.slice(0, 3)))
-      .catch(() => {});
-  }, []);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     if (!prompt.trim() || creating) return;
     setCreating(true);
 
-    // Extract key nouns for the slug — skip filler words
-    const stopWords = new Set(['a', 'an', 'the', 'that', 'this', 'where', 'which', 'with', 'and', 'or', 'for', 'to', 'in', 'on', 'my', 'our', 'is', 'are', 'can', 'do', 'app', 'application', 'i', 'we', 'lets', 'let']);
+    const stopWords = new Set([
+      'a','an','the','that','this','where','which','with','and','or','for',
+      'to','in','on','my','our','is','are','can','do','app','application','i','we','lets','let',
+    ]);
     const words = prompt.trim().toLowerCase().split(/\s+/).filter((w) => !stopWords.has(w));
     const repo =
       words
@@ -71,83 +68,206 @@ export default function HomePage() {
   }
 
   return (
-    <div className="mx-auto max-w-screen-lg px-4 py-16">
-      {/* Hero prompt */}
-      <div className="text-center mb-12">
-        <h1 className="text-4xl font-bold text-fg mb-3">
-          What do you want to build?
+    <div className="mx-auto max-w-screen-lg px-4">
+      {/* ── Hero ── */}
+      <section className="py-20 text-center">
+        <h1 className="text-5xl font-bold text-fg leading-tight">
+          Design software with specs.
+          <br />
+          <span className="text-accent-emphasis">Let AI write the code.</span>
         </h1>
-        <p className="text-lg text-fg-muted max-w-lg mx-auto">
-          Describe your idea and the AI builds it for you.
+        <p className="mt-4 text-lg text-fg-muted max-w-2xl mx-auto leading-relaxed">
+          VibeHub is a spec-first development platform. Define what you want in
+          plain English, review it like a PR, and let AI compile it into working
+          software &mdash; all version-controlled and forkable.
         </p>
-      </div>
 
-      <form onSubmit={handleCreate} className="max-w-2xl mx-auto mb-16">
-        <div className="relative bg-canvas-subtle border border-border rounded-xl overflow-hidden focus-within:border-accent/60 transition-colors shadow-sm">
-          <textarea
-            ref={textareaRef}
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="e.g. A task management app where my team can track projects and deadlines"
-            rows={3}
-            className="w-full bg-transparent px-4 pt-4 pb-12 text-sm text-fg placeholder:text-fg-subtle resize-none focus:outline-none"
+        <div className="mt-8 flex items-center justify-center gap-4 flex-wrap">
+          <a
+            href="#get-started"
+            className="inline-flex items-center gap-2 px-6 py-2.5 bg-accent text-white text-sm font-medium rounded-lg hover:bg-accent/80 transition-colors"
+          >
+            <Sparkles size={15} />
+            Try in browser
+          </a>
+          <Link
+            href={"/docs" as any}
+            className="inline-flex items-center gap-2 px-6 py-2.5 border border-border text-fg-muted text-sm font-medium rounded-lg hover:border-accent/50 hover:text-fg transition-colors"
+          >
+            Read the docs
+            <ArrowRight size={14} />
+          </Link>
+        </div>
+      </section>
+
+      {/* ── How it works ── */}
+      <section className="py-16 border-t border-border">
+        <h2 className="text-sm font-semibold text-fg-muted uppercase tracking-wide text-center mb-10">
+          How it works
+        </h2>
+        <div className="grid md:grid-cols-3 gap-8 max-w-3xl mx-auto">
+          <Step
+            icon={<FileText size={22} />}
+            number="1"
+            title="Write specs"
+            description="Describe features in plain-English markdown files. These are your source of truth — not the code."
           />
-          <div className="absolute bottom-3 right-3 flex items-center gap-2">
-            <span className="text-xs text-fg-subtle">Enter to create</span>
-            <button
-              type="submit"
-              disabled={creating || !prompt.trim()}
-              className="flex items-center gap-1.5 px-4 py-1.5 bg-accent text-white text-sm font-medium rounded-lg hover:bg-accent/80 disabled:opacity-40 transition-colors"
-            >
-              {creating ? (
-                <><Loader2 size={13} className="animate-spin" /> Building…</>
-              ) : (
-                <><Sparkles size={13} /> Create</>
-              )}
-            </button>
-          </div>
+          <Step
+            icon={<Cpu size={22} />}
+            number="2"
+            title="AI compiles"
+            description="An AI agent reads your specs and generates a complete, working implementation. Pick your model."
+          />
+          <Step
+            icon={<GitPullRequest size={22} />}
+            number="3"
+            title="Review & ship"
+            description="Review changes at the intent level, not the code level. Merge when the spec is right."
+          />
+        </div>
+      </section>
+
+      {/* ── Differentiators ── */}
+      <section className="py-16 border-t border-border">
+        <h2 className="text-sm font-semibold text-fg-muted uppercase tracking-wide text-center mb-10">
+          Why spec-first?
+        </h2>
+        <div className="grid sm:grid-cols-2 gap-6 max-w-3xl mx-auto">
+          <Differentiator
+            icon={<FileText size={18} />}
+            title="Decisions are first-class"
+            description="Design choices live in version-controlled spec files — reviewable, diffable, and portable."
+          />
+          <Differentiator
+            icon={<Users size={18} />}
+            title="Anyone can contribute"
+            description="Non-technical stakeholders read and propose changes in plain English. No code required."
+          />
+          <Differentiator
+            icon={<GitFork size={18} />}
+            title="Fork with lineage"
+            description="Fork any public project. VibeHub tracks lineage so you can pull upstream spec changes."
+          />
+          <Differentiator
+            icon={<History size={18} />}
+            title="Immutable snapshots"
+            description="Every spec change creates a snapshot. Recompile any version with any model, anytime."
+          />
+        </div>
+      </section>
+
+      {/* ── Get started form ── */}
+      <section id="get-started" className="py-16 border-t border-border">
+        <div className="text-center mb-8">
+          <h2 className="text-2xl font-bold text-fg">Start building</h2>
+          <p className="mt-2 text-sm text-fg-muted">
+            Describe your idea and we'll set up the project for you.
+          </p>
         </div>
 
-        <p className="text-xs text-fg-subtle text-center mt-3">
-          Or{' '}
-          <Link href="/new" className="text-accent-emphasis hover:underline">
-            configure manually
-          </Link>{' '}
-          to choose a framework, import a repo, and more.
-        </p>
-      </form>
-
-      {/* Recent projects */}
-      {projects.length > 0 && (
-        <div className="max-w-2xl mx-auto">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold text-fg-muted uppercase tracking-wide">Recent projects</h2>
-            <Link href="/explore" className="text-xs text-accent-emphasis hover:underline flex items-center gap-1">
-              View all <ArrowRight size={11} />
-            </Link>
-          </div>
-          <div className="space-y-2">
-            {projects.map((p) => (
-              <Link
-                key={p.id}
-                href={`/${p.owner}/${p.repo}`}
-                className="flex items-center justify-between bg-canvas-subtle border border-border rounded-lg px-4 py-3 hover:border-accent/40 transition-colors group"
+        <form onSubmit={handleCreate} className="max-w-2xl mx-auto mb-6">
+          <div className="relative bg-canvas-subtle border border-border rounded-xl overflow-hidden focus-within:border-accent/60 transition-colors shadow-sm">
+            <textarea
+              ref={textareaRef}
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="e.g. A task management app where my team can track projects and deadlines"
+              rows={3}
+              className="w-full bg-transparent px-4 pt-4 pb-12 text-sm text-fg placeholder:text-fg-subtle resize-none focus:outline-none"
+            />
+            <div className="absolute bottom-3 right-3 flex items-center gap-2">
+              <span className="text-xs text-fg-subtle">Enter to create</span>
+              <button
+                type="submit"
+                disabled={creating || !prompt.trim()}
+                className="flex items-center gap-1.5 px-4 py-1.5 bg-accent text-white text-sm font-medium rounded-lg hover:bg-accent/80 disabled:opacity-40 transition-colors"
               >
-                <div className="min-w-0">
-                  <div className="text-sm font-medium text-fg group-hover:text-accent-emphasis transition-colors truncate">
-                    {p.owner}/{p.repo}
-                  </div>
-                  {p.description && (
-                    <div className="text-xs text-fg-muted mt-0.5 truncate">{p.description}</div>
-                  )}
-                </div>
-                <ArrowRight size={13} className="text-fg-subtle group-hover:text-accent-emphasis transition-colors shrink-0 ml-3" />
-              </Link>
-            ))}
+                {creating ? (
+                  <><Loader2 size={13} className="animate-spin" /> Building&hellip;</>
+                ) : (
+                  <><Sparkles size={13} /> Create</>
+                )}
+              </button>
+            </div>
           </div>
+
+          <p className="text-xs text-fg-subtle text-center mt-3">
+            Or{' '}
+            <Link href="/new" className="text-accent-emphasis hover:underline">
+              configure manually
+            </Link>{' '}
+            to choose a framework, import a repo, and more.
+          </p>
+        </form>
+      </section>
+
+      {/* ── Desktop download CTA ── */}
+      <section className="py-16 border-t border-border mb-8">
+        <div className="max-w-2xl mx-auto text-center">
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-accent-subtle border border-border mb-4">
+            <Download size={22} className="text-accent-emphasis" />
+          </div>
+          <h2 className="text-2xl font-bold text-fg">VibeStudio</h2>
+          <p className="mt-2 text-sm text-fg-muted max-w-md mx-auto">
+            Edit specs locally, run the AI compiler on your machine, and sync
+            with VibeHub. Available for macOS, Windows, and Linux.
+          </p>
+          <p className="mt-4 text-xs text-fg-subtle">
+            Coming soon &mdash;{' '}
+            <Link href={"/docs" as any} className="text-accent-emphasis hover:underline">
+              learn more in the docs
+            </Link>
+          </p>
         </div>
-      )}
+      </section>
+    </div>
+  );
+}
+
+/* ── Sub-components ── */
+
+function Step({
+  icon,
+  number,
+  title,
+  description,
+}: {
+  icon: React.ReactNode;
+  number: string;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="text-center">
+      <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-accent-subtle border border-border text-accent-emphasis mb-3">
+        {icon}
+      </div>
+      <h3 className="text-sm font-semibold text-fg mb-1">
+        <span className="text-accent-emphasis mr-1">{number}.</span>
+        {title}
+      </h3>
+      <p className="text-sm text-fg-muted leading-relaxed">{description}</p>
+    </div>
+  );
+}
+
+function Differentiator({
+  icon,
+  title,
+  description,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="flex gap-3 p-4 rounded-lg border border-border bg-canvas-subtle">
+      <div className="shrink-0 mt-0.5 text-accent-emphasis">{icon}</div>
+      <div>
+        <h3 className="text-sm font-semibold text-fg mb-1">{title}</h3>
+        <p className="text-xs text-fg-muted leading-relaxed">{description}</p>
+      </div>
     </div>
   );
 }

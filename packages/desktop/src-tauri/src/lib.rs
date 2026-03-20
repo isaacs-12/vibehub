@@ -72,6 +72,8 @@ async fn check_for_updates() -> Result<serde_json::Value, String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_deep_link::init())
         .manage(RunState(Arc::new(Mutex::new(None::<u32>))))
         .setup(|app| {
             // ── VibeStudio (app) menu ─────────────────────────────────────────
@@ -204,9 +206,9 @@ pub fn run() {
 
             // ── Menu event handler ────────────────────────────────────────────
             app.on_menu_event(move |app_handle, event| {
-                let id = event.id().as_ref();
+                let id = event.id().as_ref().to_string();
                 // Open external URLs for help items
-                match id {
+                match id.as_str() {
                     "help-docs" => {
                         let _ = open::that("https://getvibehub.com/docs/vibestudio");
                     }
@@ -215,7 +217,8 @@ pub fn run() {
                     }
                     _ => {
                         // Forward all other menu events to the frontend
-                        let _ = app_handle.emit("menu-event", id);
+                        println!("[menu] forwarding event: {}", id);
+                        let _ = app_handle.emit("menu-event", &id);
                     }
                 }
             });

@@ -4,6 +4,8 @@
 
 The thesis: the most important thing in a software project isn't the code, it's the *decision* behind the code. VibeHub makes those decisions first-class — versioned, reviewable, and portable.
 
+**[getvibehub.com](https://getvibehub.com)** · [Download Desktop App](https://getvibehub.com/download) · [Documentation](https://getvibehub.com/docs)
+
 <img width="1291" height="664" alt="Screenshot 2026-03-11 at 11 39 14 PM" src="https://github.com/user-attachments/assets/b169a65d-847e-460f-9ec0-51602c9c9c99" />
 
 

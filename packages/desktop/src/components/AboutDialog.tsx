@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Zap } from 'lucide-react';
+import appIcon from '../assets/icon.png';
 
 interface Props {
   onClose: () => void;
@@ -24,9 +24,7 @@ export default function AboutDialog({ onClose }: Props) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-center mb-4">
-          <div className="w-16 h-16 rounded-2xl bg-accent/20 flex items-center justify-center">
-            <Zap size={32} className="text-accent-light" />
-          </div>
+          <img src={appIcon} alt="VibeStudio" className="w-16 h-16 rounded-2xl" />
         </div>
 
         <h2 className="text-lg font-semibold text-gray-100">VibeStudio</h2>

@@ -12,6 +12,7 @@ import AboutDialog from './components/AboutDialog.tsx';
 import UpdateCheckDialog from './components/UpdateCheckDialog.tsx';
 import { useVibeStore } from './store/index.ts';
 import { useVibeProject } from './hooks/useVibeProject.ts';
+import { restoreAuth, handleAuthDeepLink } from './lib/auth.ts';
 
 function handleMenuEvent(
   id: string,
@@ -19,6 +20,7 @@ function handleMenuEvent(
   setAboutOpen: (v: boolean) => void,
   setUpdateCheckOpen: (v: boolean) => void,
 ) {
+  console.log('[menu-event] received:', JSON.stringify(id));
   const store = useVibeStore.getState();
   switch (id) {
     case 'app-about':
@@ -66,10 +68,26 @@ export default function App() {
   const [aboutOpen, setAboutOpen] = useState(false);
   const [updateCheckOpen, setUpdateCheckOpen] = useState(false);
 
-  // On mount, try to load from last session or prompt user
+  // On mount, restore auth + load last project
   useEffect(() => {
+    restoreAuth();
     const last = localStorage.getItem('lastProjectRoot');
     if (last) openProject(last);
+  }, []);
+
+  // Listen for deep-link auth callbacks (vibehub://auth?token=...)
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    import('@tauri-apps/plugin-deep-link').then(({ onOpenUrl }) => {
+      onOpenUrl((urls) => {
+        for (const url of urls) {
+          if (url.startsWith('vibehub://auth')) {
+            handleAuthDeepLink(url);
+          }
+        }
+      }).then((fn) => { unlisten = fn; });
+    }).catch(() => {});
+    return () => { unlisten?.(); };
   }, []);
 
   // Subscribe to run output, run-ended, and native menu events

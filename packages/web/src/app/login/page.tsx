@@ -2,7 +2,7 @@
 
 import { signIn } from 'next-auth/react';
 import { useSearchParams } from 'next/navigation';
-import { Zap } from 'lucide-react';
+import Image from 'next/image';
 import { Suspense } from 'react';
 
 function LoginForm() {
@@ -16,7 +16,7 @@ function LoginForm() {
       <div className="w-full max-w-sm mx-auto px-6">
         <div className="text-center mb-8">
           <div className="flex items-center justify-center gap-2 text-accent-emphasis font-bold text-2xl mb-2">
-            <Zap size={28} />
+            <Image src="/logo.png" alt="" width={28} height={28} />
             VibeHub
           </div>
           <p className="text-fg-muted text-sm">

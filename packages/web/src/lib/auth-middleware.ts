@@ -39,30 +39,25 @@ export async function getAuthUser(req: Request): Promise<AuthUser | null> {
   };
 }
 
-/** Validate a Bearer token against the sessions table. */
+/** Validate a Bearer token (JWT signed with AUTH_SECRET). */
 async function getUserFromToken(token: string): Promise<AuthUser | null> {
-  if (!process.env.DATABASE_URL) return null;
+  const secret = process.env.AUTH_SECRET;
+  if (!secret) return null;
 
   try {
-    const { db } = await import('./db/client');
-    const { sessions, users } = await import('./db/schema');
-    const { eq, and, gt } = await import('drizzle-orm');
+    const { jwtVerify } = await import('jose');
+    const key = new TextEncoder().encode(secret);
+    const { payload } = await jwtVerify(token, key);
 
-    const [row] = await db
-      .select({
-        id: users.id,
-        handle: users.handle,
-        email: users.email,
-        name: users.name,
-        avatarUrl: users.avatarUrl,
-      })
-      .from(sessions)
-      .innerJoin(users, eq(sessions.userId, users.id))
-      .where(and(eq(sessions.id, token), gt(sessions.expiresAt, new Date())))
-      .limit(1);
+    if (!payload.sub || !payload.handle) return null;
 
-    if (!row) return null;
-    return { ...row, name: row.name ?? row.handle, avatarUrl: row.avatarUrl ?? null };
+    return {
+      id: payload.sub,
+      handle: payload.handle as string,
+      email: (payload.email as string) ?? '',
+      name: (payload.name as string) ?? (payload.handle as string),
+      avatarUrl: (payload.avatarUrl as string) ?? null,
+    };
   } catch {
     return null;
   }

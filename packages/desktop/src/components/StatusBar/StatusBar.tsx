@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { GitBranch, GitFork, GitMerge, Wifi, ArrowUp, ArrowDown, Loader2 } from 'lucide-react';
+import { GitBranch, GitFork, GitMerge, ArrowUp, ArrowDown, Loader2, User, Settings, ExternalLink, Copy, Check } from 'lucide-react';
 import { useVibeStore } from '../../store/index.ts';
 import { useGit } from '../../hooks/useGit.ts';
+import { startLogin, getLoginUrl, handleAuthDeepLink } from '../../lib/auth.ts';
 
 export default function StatusBar() {
-  const { currentBranch, branches, projectRoot, codePeekFiles, chatSessions, setChatSessions, setFeatures } = useVibeStore();
+  const { currentBranch, branches, projectRoot, codePeekFiles, chatSessions, setChatSessions, setFeatures, authUser, clearAuth } = useVibeStore();
   const { switchBranch, createBranch } = useGit();
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
   const [newBranchOpen, setNewBranchOpen] = useState(false);
@@ -14,6 +15,7 @@ export default function StatusBar() {
   const [pullLoading, setPullLoading] = useState(false);
   const [mergeLoading, setMergeLoading] = useState(false);
   const [remoteModal, setRemoteModal] = useState<{ owner: string; repo: string; webUrl: string } | null>(null);
+  const [signInOpen, setSignInOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const isOnMain = currentBranch === 'main' || currentBranch === 'master';
@@ -25,6 +27,21 @@ export default function StatusBar() {
       setTimeout(() => inputRef.current?.focus(), 0);
     }
   }, [newBranchOpen]);
+
+  // ── Remote config ───────────────────────────────────────────────────────────
+
+  async function handleOpenRemoteConfig() {
+    if (!projectRoot) return;
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const existing = await invoke<{ owner: string; repo: string; webUrl: string }>(
+        'read_remote_config', { root: projectRoot },
+      );
+      setRemoteModal(existing);
+    } catch {
+      setRemoteModal({ owner: '', repo: '', webUrl: 'https://getvibehub.com' });
+    }
+  }
 
   // ── Branch management ────────────────────────────────────────────────────────
 
@@ -114,12 +131,11 @@ export default function StatusBar() {
     }
   }
 
-  async function handleRemoteSave() {
+  async function handleRemoteSave(andPush = false) {
     if (!projectRoot || !remoteModal || !remoteModal.owner.trim() || !remoteModal.repo.trim()) return;
     setPushLoading(true);
     try {
       const { invoke } = await import('@tauri-apps/api/core');
-      const { message } = await import('@tauri-apps/plugin-dialog');
       await invoke('write_remote_config', {
         root: projectRoot,
         owner: remoteModal.owner.trim(),
@@ -127,11 +143,14 @@ export default function StatusBar() {
         webUrl: remoteModal.webUrl.trim() || 'https://getvibehub.com',
       });
       setRemoteModal(null);
-      const result = await doPush();
-      if (result) await message(`PR created:\n${result.url}`, { title: 'Push', kind: 'info' });
+      if (andPush) {
+        const { message } = await import('@tauri-apps/plugin-dialog');
+        const result = await doPush();
+        if (result) await message(`PR created:\n${result.url}`, { title: 'Push', kind: 'info' });
+      }
     } catch (err) {
       const { message } = await import('@tauri-apps/plugin-dialog');
-      await message(String(err), { title: 'Push', kind: 'error' });
+      await message(String(err), { title: 'Remote', kind: 'error' });
     } finally {
       setPushLoading(false);
     }
@@ -229,10 +248,37 @@ export default function StatusBar() {
         </button>
       </div>
 
-      {/* Right: project root */}
-      <div className="flex items-center gap-3 text-white/70">
+      {/* Right: remote config + auth + project root */}
+      <div className="flex items-center gap-2 text-white/70">
         {projectRoot && <span className="font-mono truncate max-w-xs">{projectRoot}</span>}
-        <Wifi size={11} />
+        {projectRoot && (
+          <button
+            onClick={handleOpenRemoteConfig}
+            title="Configure remote (owner/repo)"
+            className="flex items-center hover:bg-white/10 px-1 py-0.5 rounded transition-colors"
+          >
+            <Settings size={11} />
+          </button>
+        )}
+        {authUser ? (
+          <button
+            onClick={() => clearAuth()}
+            title={`Signed in as ${authUser.name ?? authUser.email} — click to sign out`}
+            className="flex items-center gap-1 hover:bg-white/10 px-1.5 py-0.5 rounded transition-colors"
+          >
+            <User size={11} />
+            <span className="text-[10px] max-w-[100px] truncate">{authUser.name ?? authUser.email}</span>
+          </button>
+        ) : (
+          <button
+            onClick={() => setSignInOpen(true)}
+            title="Sign in to VibeHub"
+            className="flex items-center gap-1 hover:bg-white/10 px-1.5 py-0.5 rounded transition-colors"
+          >
+            <User size={11} />
+            <span className="text-[10px]">Sign in</span>
+          </button>
+        )}
       </div>
 
       {/* Branch dropdown */}
@@ -300,13 +346,132 @@ export default function StatusBar() {
             </div>
             <div className="flex gap-2 justify-end">
               <button type="button" onClick={() => setRemoteModal(null)} className="text-xs px-2.5 py-1 rounded border border-surface-border text-muted hover:text-gray-200">Cancel</button>
-              <button type="button" onClick={handleRemoteSave} disabled={pushLoading || !remoteModal.owner.trim() || !remoteModal.repo.trim()} className="text-xs px-2.5 py-1 rounded bg-accent text-white hover:bg-accent/80 disabled:opacity-50">
+              <button type="button" onClick={() => handleRemoteSave(false)} disabled={pushLoading || !remoteModal.owner.trim() || !remoteModal.repo.trim()} className="text-xs px-2.5 py-1 rounded border border-surface-border text-gray-200 hover:bg-surface disabled:opacity-50">
+                Save
+              </button>
+              <button type="button" onClick={() => handleRemoteSave(true)} disabled={pushLoading || !remoteModal.owner.trim() || !remoteModal.repo.trim()} className="text-xs px-2.5 py-1 rounded bg-accent text-white hover:bg-accent/80 disabled:opacity-50">
                 {pushLoading ? 'Pushing…' : 'Save & Push'}
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* Sign in modal */}
+      {signInOpen && (
+        <SignInModal onClose={() => setSignInOpen(false)} />
+      )}
+    </div>
+  );
+}
+
+function SignInModal({ onClose }: { onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const [pasteToken, setPasteToken] = useState('');
+  const [tokenError, setTokenError] = useState('');
+  const loginUrl = getLoginUrl();
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(loginUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {}
+  }
+
+  async function handleOpenBrowser() {
+    await startLogin();
+  }
+
+  async function handlePasteToken() {
+    const token = pasteToken.trim();
+    if (!token) return;
+    try {
+      await handleAuthDeepLink(`vibehub://auth?token=${token}`);
+      const { authUser } = useVibeStore.getState();
+      if (authUser) {
+        onClose();
+      } else {
+        setTokenError('Invalid token. Make sure you copied the full token from the browser.');
+      }
+    } catch {
+      setTokenError('Invalid token. Make sure you copied the full token from the browser.');
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50" onClick={onClose}>
+      <div className="bg-surface-overlay border border-surface-border rounded-lg shadow-xl w-96 p-5" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-sm font-semibold text-gray-200 mb-2">Sign in to VibeHub</h3>
+        <p className="text-xs text-muted mb-4">
+          Sign in with your VibeHub account to push and pull specs.
+        </p>
+
+        {/* Step 1: Open browser */}
+        <div className="mb-3">
+          <div className="text-[10px] text-muted uppercase tracking-wider mb-1.5 font-semibold">Step 1 — Sign in</div>
+          <button
+            type="button"
+            onClick={handleOpenBrowser}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2 text-xs rounded bg-accent text-white font-medium hover:bg-accent/80 transition-colors"
+          >
+            <ExternalLink size={13} />
+            Open in Browser
+          </button>
+          <div className="flex items-center gap-1.5 mt-2">
+            <input
+              type="text"
+              readOnly
+              value={loginUrl}
+              className="flex-1 bg-surface border border-surface-border rounded px-2 py-1.5 text-[10px] text-gray-400 font-mono select-all focus:outline-none focus:border-accent truncate"
+              onFocus={(e) => e.target.select()}
+            />
+            <button
+              type="button"
+              onClick={handleCopy}
+              title="Copy link"
+              className="px-2 py-1.5 rounded border border-surface-border text-muted hover:text-gray-200 hover:border-gray-500 transition-colors shrink-0"
+            >
+              {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
+            </button>
+          </div>
+        </div>
+
+        {/* Step 2: Paste token */}
+        <div className="mb-3 pt-3 border-t border-surface-border">
+          <div className="text-[10px] text-muted uppercase tracking-wider mb-1.5 font-semibold">Step 2 — Paste token</div>
+          <p className="text-[10px] text-muted mb-1.5">After signing in, copy the token from the browser and paste it here.</p>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="text"
+              value={pasteToken}
+              onChange={(e) => { setPasteToken(e.target.value); setTokenError(''); }}
+              onKeyDown={(e) => { if (e.key === 'Enter') handlePasteToken(); }}
+              placeholder="Paste token here…"
+              className="flex-1 bg-surface border border-surface-border rounded px-2 py-1.5 text-[11px] text-gray-300 font-mono placeholder:text-gray-600 focus:outline-none focus:border-accent"
+            />
+            <button
+              type="button"
+              onClick={handlePasteToken}
+              disabled={!pasteToken.trim()}
+              className="px-3 py-1.5 text-xs rounded bg-accent text-white font-medium hover:bg-accent/80 disabled:opacity-50 transition-colors shrink-0"
+            >
+              Connect
+            </button>
+          </div>
+          {tokenError && <p className="text-[10px] text-red-400 mt-1">{tokenError}</p>}
+        </div>
+
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3 py-1.5 text-xs rounded border border-surface-border text-muted hover:text-gray-200 transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

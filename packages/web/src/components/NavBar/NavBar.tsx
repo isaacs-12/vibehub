@@ -3,7 +3,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useSession, signIn, signOut } from 'next-auth/react';
-import { Zap, Settings, LogOut, User, X } from 'lucide-react';
+import Image from 'next/image';
+import { Settings, LogOut, User, X } from 'lucide-react';
 
 export default function NavBar() {
   const { data: session, status } = useSession();
@@ -17,7 +18,7 @@ export default function NavBar() {
         <div className="mx-auto max-w-screen-xl px-4 h-14 flex items-center gap-4">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2 text-accent-emphasis font-bold text-lg shrink-0">
-            <Zap size={20} />
+            <Image src="/logo.png" alt="" width={20} height={20} />
             VibeHub
           </Link>
 
@@ -89,7 +90,7 @@ function SignInModal({ onClose }: { onClose: () => void }) {
 
         <div className="text-center mb-6">
           <div className="flex items-center justify-center gap-2 text-accent-emphasis font-bold text-xl mb-1">
-            <Zap size={22} />
+            <Image src="/logo.png" alt="" width={22} height={22} />
             VibeHub
           </div>
           <p className="text-fg-muted text-sm">Sign in to your account</p>

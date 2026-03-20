@@ -161,6 +161,13 @@ vibe compile`}</CodeBlock>
             like specs, snapshots, and lineage
           </li>
           <li>
+            Learn how the{' '}
+            <a href="/docs/compilation" className="text-accent-emphasis hover:underline">
+              compiler
+            </a>{' '}
+            turns specs into working code
+          </li>
+          <li>
             Set up{' '}
             <a href="/docs/vibestudio" className="text-accent-emphasis hover:underline">
               VibeStudio

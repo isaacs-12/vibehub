@@ -28,8 +28,20 @@ import { execSync } from 'node:child_process';
 import { parseVibeGrammar, buildDependencyGraph, fromGrammarName } from './vibeGrammar.ts';
 
 // ─── Model tiering ──────────────────────────────────────────────────────────
-const GENERATION_MODEL = process.env.AGENT_MODEL ?? 'claude-sonnet-4-6';
-const VALIDATION_MODEL = process.env.AGENT_FAST_MODEL ?? GENERATION_MODEL;
+const DEFAULT_GENERATION_MODEL = process.env.AGENT_MODEL ?? 'claude-sonnet-4-6';
+const DEFAULT_VALIDATION_MODEL = process.env.AGENT_FAST_MODEL ?? DEFAULT_GENERATION_MODEL;
+
+/** Per-job model configuration, resolved from user preferences. */
+export interface ModelConfig {
+  /** Generation model ID (e.g. 'claude-sonnet-4-6', 'gemini-2.5-flash'). */
+  generationModel: string;
+  /** Validation model ID. Defaults to generationModel if omitted. */
+  validationModel?: string;
+  /** Decrypted API key to use instead of env vars. */
+  apiKey?: string;
+  /** Provider hint — used to route the API key to the right client. */
+  provider?: string;
+}
 
 const PHASE1_MAX_ITERATIONS = 10;
 const PHASE2_MAX_ITERATIONS = 25;
@@ -130,13 +142,14 @@ interface LLMProvider {
 // ── Anthropic provider ─────────────────────────────────────────────────────────
 
 class AnthropicProvider implements LLMProvider {
-  private readonly client = new Anthropic();
+  private readonly client: Anthropic;
   private readonly useThinking: boolean;
   readonly model: string;
 
-  constructor(model: string) {
+  constructor(model: string, apiKey?: string) {
     this.model = model;
     this.useThinking = model.includes('sonnet') || model.includes('opus');
+    this.client = apiKey ? new Anthropic({ apiKey }) : new Anthropic();
   }
 
   async createMessage(system: string, messages: Anthropic.MessageParam[], tools: Anthropic.Tool[]) {
@@ -169,11 +182,12 @@ class AnthropicProvider implements LLMProvider {
 // ── Gemini provider ────────────────────────────────────────────────────────────
 
 class GeminiProvider implements LLMProvider {
-  private readonly genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY ?? '');
+  private readonly genAI: GoogleGenerativeAI;
   readonly model: string;
 
-  constructor(model: string) {
+  constructor(model: string, apiKey?: string) {
     this.model = model;
+    this.genAI = new GoogleGenerativeAI(apiKey ?? process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY ?? '');
   }
 
   async createMessage(system: string, messages: Anthropic.MessageParam[], tools: Anthropic.Tool[]) {
@@ -270,8 +284,10 @@ function toGeminiContents(
   });
 }
 
-function createProvider(model: string): LLMProvider {
-  return model.startsWith('gemini') ? new GeminiProvider(model) : new AnthropicProvider(model);
+function createProvider(model: string, apiKey?: string): LLMProvider {
+  return model.startsWith('gemini')
+    ? new GeminiProvider(model, apiKey)
+    : new AnthropicProvider(model, apiKey);
 }
 
 // ─── Topological sort ─────────────────────────────────────────────────────────
@@ -343,11 +359,18 @@ function topologicalSort(features: FeatureNode[]): FeatureNode[] {
 export async function runCompileJob(
   headFeatures: CodeFile[],
   onProgress: OnProgress = noopProgress,
+  modelConfig?: ModelConfig,
 ): Promise<CodeFile[]> {
   if (headFeatures.length === 0) return [];
 
-  const genProvider = createProvider(GENERATION_MODEL);
-  const valProvider = createProvider(VALIDATION_MODEL);
+  const genModel = modelConfig?.generationModel ?? DEFAULT_GENERATION_MODEL;
+  const valModel = modelConfig?.validationModel ?? modelConfig?.generationModel ?? DEFAULT_VALIDATION_MODEL;
+  const apiKey = modelConfig?.apiKey;
+
+  const genProvider = createProvider(genModel, apiKey);
+  const valProvider = genModel === valModel
+    ? genProvider
+    : createProvider(valModel, apiKey);
 
   const featureNodes: FeatureNode[] = headFeatures.map(({ path: p, content }) => ({
     slug: p.replace(/^\.vibe[/\\]features[/\\]/, '').replace(/\.md$/, ''),
@@ -372,8 +395,8 @@ export async function runCompileJob(
     type: 'compile_start',
     features: featureNodes.map((f) => f.slug),
     order: sorted.map((f) => f.slug),
-    generationModel: GENERATION_MODEL,
-    validationModel: VALIDATION_MODEL,
+    generationModel: genModel,
+    validationModel: valModel,
   });
 
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'vibehub-agent-'));

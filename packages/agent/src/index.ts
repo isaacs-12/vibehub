@@ -11,12 +11,19 @@
  *
  * Required env vars:
  *   VIBEHUB_API_URL   — base URL of the web backend (e.g. https://vibehub.app)
- *   ANTHROPIC_API_KEY — Claude API key for code generation
  *   AGENT_SECRET      — must match AGENT_SECRET on the web backend (optional in dev)
+ *   AUTH_SECRET        — shared secret for decrypting user API keys (must match web backend)
+ *
+ * Optional env vars (fallback when job has no model config):
+ *   AGENT_MODEL       — default generation model (default: claude-sonnet-4-6)
+ *   AGENT_FAST_MODEL  — default validation model (default: same as AGENT_MODEL)
+ *   ANTHROPIC_API_KEY — platform Anthropic key (used for free-tier jobs)
+ *   GEMINI_API_KEY    — platform Google key (used for free-tier jobs)
  */
 
 import http from 'node:http';
-import { runCompileJob, type CompileEvent } from './agent.ts';
+import crypto from 'node:crypto';
+import { runCompileJob, type CompileEvent, type ModelConfig } from './agent.ts';
 
 const PORT = Number(process.env.PORT ?? 8080);
 const API_URL = (process.env.VIBEHUB_API_URL ?? 'http://localhost:3000').replace(/\/$/, '');
@@ -38,11 +45,27 @@ async function pollOnce() {
   }
 
   const { job, pr } = await res.json() as {
-    job: { id: string; prId: string };
+    job: {
+      id: string;
+      prId: string;
+      model?: string;
+      fastModel?: string;
+      provider?: string;
+      apiKey?: string;
+      keySource?: string;
+    };
     pr: { intentDiff?: { headFeatures?: { path: string; content: string }[] } } | null;
   };
 
-  console.log(`[agent] picked up job ${job.id} for PR ${job.prId}`);
+  console.log(`[agent] picked up job ${job.id} for PR ${job.prId} (model: ${job.model ?? 'default'})`);
+
+  // Build model config from job — decrypt user API key if present
+  const modelConfig: ModelConfig | undefined = job.model ? {
+    generationModel: job.model,
+    validationModel: job.fastModel ?? undefined,
+    provider: job.provider,
+    apiKey: job.apiKey && job.keySource === 'user' ? decryptApiKey(job.apiKey) : undefined,
+  } : undefined;
 
   try {
     // Buffer events and flush to server periodically to avoid excessive requests
@@ -76,14 +99,19 @@ async function pollOnce() {
       }
     };
 
-    const proofs = await runCompileJob(pr?.intentDiff?.headFeatures ?? [], onProgress);
+    const proofs = await runCompileJob(pr?.intentDiff?.headFeatures ?? [], onProgress, modelConfig);
     // Flush any remaining events before reporting completion
     if (flushTimer) clearTimeout(flushTimer);
     await flushEvents();
     await fetch(`${API_URL}/api/agent/jobs/${job.id}`, {
       method: 'PATCH',
       headers: headers(),
-      body: JSON.stringify({ status: 'completed', prId: job.prId, implementationProofs: proofs }),
+      body: JSON.stringify({
+        status: 'completed',
+        prId: job.prId,
+        model: job.model ?? 'unknown',
+        implementationProofs: proofs,
+      }),
     });
     console.log(`[agent] job ${job.id} completed — ${proofs.length} file(s)`);
   } catch (err) {
@@ -95,6 +123,21 @@ async function pollOnce() {
       body: JSON.stringify({ status: 'failed', prId: job.prId, error: msg }),
     });
   }
+}
+
+/**
+ * Decrypt a user API key that was encrypted by the web backend using AES-256-CBC.
+ * Uses the same AUTH_SECRET as the web backend.
+ */
+function decryptApiKey(encrypted: string): string {
+  const secret = process.env.AUTH_SECRET || 'dev-secret-do-not-use-in-prod';
+  const key = crypto.createHash('sha256').update(secret).digest();
+  const [ivHex, encHex] = encrypted.split(':');
+  const iv = Buffer.from(ivHex, 'hex');
+  const decipher = crypto.createDecipheriv('aes-256-cbc', key, iv);
+  let decrypted = decipher.update(encHex, 'hex', 'utf8');
+  decrypted += decipher.final('utf8');
+  return decrypted;
 }
 
 async function main() {

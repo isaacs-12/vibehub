@@ -97,6 +97,7 @@ export async function POST(request: Request, { params }: Params) {
     prId: pr.id,
     status: 'pending',
     model: resolved.model,
+    fastModel: resolved.fastModel,
     provider: resolved.provider,
     keySource: resolved.keySource,
     apiKey: resolved.apiKey,

@@ -3,11 +3,12 @@
 import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { BookOpen, Lightbulb, Monitor, Terminal } from 'lucide-react';
+import { BookOpen, Lightbulb, Cpu, Monitor, Terminal } from 'lucide-react';
 
 const NAV_ITEMS = [
   { href: '/docs/getting-started', label: 'Getting Started', icon: BookOpen },
   { href: '/docs/concepts', label: 'Concepts', icon: Lightbulb },
+  { href: '/docs/compilation', label: 'Compilation', icon: Cpu },
   { href: '/docs/vibestudio', label: 'VibeStudio', icon: Monitor },
   { href: '/docs/cli', label: 'CLI Reference', icon: Terminal },
 ] as const;

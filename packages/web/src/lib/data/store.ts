@@ -128,9 +128,11 @@ export interface CompileJob {
   prId: string;
   /** 'pending' = waiting to be picked up; 'running' = agent is working; 'completed' / 'failed' = done. */
   status: 'pending' | 'running' | 'completed' | 'failed';
-  /** The model the agent should use for this job. */
+  /** The generation model the agent should use for this job. */
   model?: string;
-  /** The provider for the model ('google' | 'anthropic' | 'openai'). */
+  /** The validation/fast model (null = same as generation model). */
+  fastModel?: string;
+  /** The provider for the generation model ('google' | 'anthropic' | 'openai'). */
   provider?: string;
   /** Encrypted API key — only set when using a user-provided key. The agent decrypts server-side. */
   apiKey?: string;

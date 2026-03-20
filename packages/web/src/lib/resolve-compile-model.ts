@@ -2,10 +2,11 @@
  * Resolves which model and API key to use for a compile job.
  * Called when a PR is created or merged to populate the CompileJob with model info.
  */
-import { resolveModel, type Provider, DEFAULT_LOGGED_IN_MODEL, ANONYMOUS_MODEL } from './models';
+import { resolveModelPair, type Provider, DEFAULT_LOGGED_IN_MODEL, ANONYMOUS_MODEL } from './models';
 
 interface ResolveResult {
   model: string;
+  fastModel?: string;
   provider: string;
   keySource: string;
   apiKey?: string;
@@ -29,9 +30,10 @@ export async function resolveCompileModel(userId: string | null): Promise<Resolv
     const { userModelPreferences, userApiKeys } = await import('./db/schema');
     const { eq } = await import('drizzle-orm');
 
-    // Get user's preferred model
+    // Get user's preferred model (generation + optional fast/validation model)
     const [prefs] = await db.select().from(userModelPreferences).where(eq(userModelPreferences.userId, userId)).limit(1);
     const preferredModel = prefs?.preferredModel ?? DEFAULT_LOGGED_IN_MODEL;
+    const preferredFastModel = prefs?.preferredFastModel ?? null;
 
     // Get user's API keys (encrypted)
     const keys = await db.select().from(userApiKeys).where(eq(userApiKeys.userId, userId));
@@ -40,14 +42,15 @@ export async function resolveCompileModel(userId: string | null): Promise<Resolv
       userKeys[k.provider as Provider] = k.encryptedApiKey; // keep encrypted — agent decrypts
     }
 
-    const resolved = resolveModel(userId, preferredModel, userKeys);
+    const { generation, validation } = resolveModelPair(userId, preferredModel, preferredFastModel, userKeys);
 
     return {
-      model: resolved.modelId,
-      provider: resolved.provider,
-      keySource: resolved.keySource,
+      model: generation.modelId,
+      fastModel: validation.modelId !== generation.modelId ? validation.modelId : undefined,
+      provider: generation.provider,
+      keySource: generation.keySource,
       // Pass encrypted key if using user's key (agent will decrypt server-side)
-      apiKey: resolved.keySource === 'user' ? userKeys[resolved.provider] : undefined,
+      apiKey: generation.keySource === 'user' ? userKeys[generation.provider] : undefined,
     };
   } catch {
     return {

@@ -128,34 +128,25 @@ export default function ConceptsPage() {
 
       <Section title="Compilation">
         <p>
-          Compilation is the process of turning specs into working code. The
-          compiler runs in four phases:
+          Compilation is the process of turning specs into working code.
+          Features are sorted by their dependency graph, then each feature goes
+          through a two-phase agentic loop: a strong model generates the code,
+          then a fast model builds, typechecks, tests, and fixes errors
+          iteratively until everything passes.
         </p>
-        <ol className="list-decimal list-inside space-y-2 text-sm text-fg-muted">
-          <li>
-            <strong className="text-fg">Code generation</strong> &mdash; An AI
-            model reads each feature spec plus existing source files and
-            generates or updates the implementation.
-          </li>
-          <li>
-            <strong className="text-fg">Type checking</strong> &mdash; Runs{' '}
-            <Code>tsc --noEmit</Code> (or equivalent) to catch type errors in
-            the generated code.
-          </li>
-          <li>
-            <strong className="text-fg">Tests</strong> &mdash; Auto-detects and
-            runs your test suite (Vitest, Jest, pytest, Go test, etc.).
-          </li>
-          <li>
-            <strong className="text-fg">Requirement validation</strong> &mdash;
-            AI scores each feature 0&ndash;100 against its spec. Below 75 is
-            flagged.
-          </li>
-        </ol>
         <p>
           You can compile locally via the CLI (<Code>vibe compile</Code>) or
-          trigger a cloud compile from the VibeHub web UI. Cloud compiles use a
-          two-phase agentic loop that can iterate up to 25 times to fix issues.
+          trigger a cloud compile from the VibeHub web UI. Cloud compiles show
+          real-time progress as the agent works.
+        </p>
+        <p>
+          For a deep dive into how the agent works &mdash; dependency
+          resolution, the two-phase loop, tool sandboxing, model selection, and
+          more &mdash; see the{' '}
+          <a href="/docs/compilation" className="text-accent-emphasis hover:underline">
+            Compilation
+          </a>{' '}
+          docs.
         </p>
       </Section>
 

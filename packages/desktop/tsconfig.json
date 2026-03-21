@@ -5,6 +5,7 @@
     "lib": ["ES2021", "DOM"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
     "jsx": "react-jsx",
     "noEmit": true
   },

@@ -76,7 +76,7 @@ help:
 	@echo "    make deploy-agent   Build & deploy agent to Cloud Run"
 	@echo "    make deploy-all     Deploy both web + agent"
 	@echo "    make build-desktop  Build VibeStudio .app/.dmg"
-	@echo "    make release-desktop VERSION=x.y.z  Build + create GitHub release"
+	@echo "    make release VERSION=x.y.z  Bump versions, build all, deploy, create GitHub release"
 	@echo "    make db-migrate-prod  Run Drizzle push against prod DATABASE_URL"
 	@echo "    make secrets-list   List required GCP secrets"
 	@echo "    make secrets-create Create all secret placeholders in Secret Manager"
@@ -349,38 +349,85 @@ secrets-create: gcp-check
 lint: venv
 	$(VENV)/bin/pre-commit run --all-files
 
-# ── Desktop release ───────────────────────────────────────────────────────────
-.PHONY: build-desktop release-desktop
+# ── Release ───────────────────────────────────────────────────────────────────
+# Unified release: bumps versions everywhere, cross-compiles CLI, builds desktop,
+# deploys web + agent to Cloud Run, creates a single GitHub release with all artifacts.
+#
+# Usage:  make release VERSION=0.2.0
+#
+# Steps:
+#   1. Bump version in all package.json + tauri.conf.json
+#   2. Cross-compile CLI for macOS + Linux (arm64/amd64)
+#   3. Build VibeStudio desktop app (.dmg)
+#   4. Deploy web + agent to Cloud Run
+#   5. Commit version bump, tag, create GitHub release with all artifacts
+#
+.PHONY: release build-desktop build-cli-all version-bump
 
-# Build VibeStudio for the current platform (macOS .dmg + .app, or Windows .msi)
 build-desktop:
 	@echo "  Building VibeStudio…"
 	$(NPM) run tauri build --workspace=packages/desktop
 	@echo "  $(GREEN)✔ Desktop build complete$(RESET)"
 	@echo "  Artifacts: packages/desktop/src-tauri/target/release/bundle/"
 
-# Build + create a GitHub release with the desktop artifact
-# Usage: make release-desktop VERSION=0.2.0
-release-desktop: build-desktop
-	@if [ -z "$(VERSION)" ]; then echo "  $(RED)✘ VERSION required$(RESET)  Usage: make release-desktop VERSION=0.2.0"; exit 1; fi
-	@command -v gh >/dev/null 2>&1 || { echo "  $(RED)✘ gh CLI not found$(RESET)  Install: brew install gh"; exit 1; fi
-	@echo "  Creating GitHub release v$(VERSION)…"
-	@DMG=$$(find packages/desktop/src-tauri/target/release/bundle/dmg -name '*.dmg' 2>/dev/null | head -1); \
+build-cli-all:
+	@echo "  Cross-compiling CLI…"
+	@mkdir -p packages/cli/dist
+	@cd packages/cli && \
+	for pair in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64; do \
+		os=$${pair%%/*}; arch=$${pair##*/}; \
+		echo "    $$os/$$arch…"; \
+		GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 go build -ldflags="-s -w" -o dist/vibe . ; \
+		tar -czf dist/vibe-$$os-$$arch.tar.gz -C dist vibe; \
+		rm dist/vibe; \
+	done
+	@echo "  $(GREEN)✔ CLI cross-compiled$(RESET)  (4 tarballs in packages/cli/dist/)"
+
+version-bump:
+	@if [ -z "$(VERSION)" ]; then echo "  $(RED)✘ VERSION required$(RESET)  Usage: make release VERSION=0.2.0"; exit 1; fi
+	@echo "  Bumping version to $(VERSION)…"
+	@for f in package.json packages/web/package.json packages/agent/package.json packages/desktop/package.json; do \
+		sed -i '' 's/"version": *"[^"]*"/"version": "$(VERSION)"/' $$f; \
+	done
+	@sed -i '' 's/"version": *"[^"]*"/"version": "$(VERSION)"/' packages/desktop/src-tauri/tauri.conf.json
+	@echo "  $(GREEN)✔ All manifests bumped to $(VERSION)$(RESET)"
+
+release: version-bump build-cli-all build-desktop deploy-all
+	@if [ -z "$(VERSION)" ]; then echo "  $(RED)✘ VERSION required$(RESET)  Usage: make release VERSION=0.2.0"; exit 1; fi
+	@command -v gh >/dev/null 2>&1 || { echo "  $(RED)✘ gh CLI not found$(RESET)  Install: brew install gh"; exit 1; }
+	@echo ""
+	@echo "  $(BOLD)Creating release v$(VERSION)…$(RESET)"
+	@echo ""
+	@# Commit version bump + tag
+	git add package.json packages/web/package.json packages/agent/package.json packages/desktop/package.json packages/desktop/src-tauri/tauri.conf.json
+	git commit -m "release v$(VERSION)"
+	git tag "v$(VERSION)"
+	@echo "  $(GREEN)✔ Tagged v$(VERSION)$(RESET)"
+	@# Collect release assets
+	@ASSETS=""; \
+	for f in packages/cli/dist/vibe-*.tar.gz; do \
+		ASSETS="$$ASSETS $$f"; \
+		echo "  CLI: $$f"; \
+	done; \
+	DMG=$$(find packages/desktop/src-tauri/target/release/bundle/dmg -name '*.dmg' 2>/dev/null | head -1); \
+	if [ -n "$$DMG" ]; then ASSETS="$$ASSETS $$DMG"; echo "  Desktop: $$DMG"; fi; \
 	APP_PATH=$$(find packages/desktop/src-tauri/target/release/bundle/macos -name '*.app' 2>/dev/null | head -1); \
-	ASSETS=""; \
-	if [ -n "$$DMG" ]; then ASSETS="$$ASSETS $$DMG"; echo "  Found DMG: $$DMG"; fi; \
 	if [ -n "$$APP_PATH" ]; then \
 		TAR_NAME="VibeStudio-$(VERSION)-macos.tar.gz"; \
 		tar -czf "$$TAR_NAME" -C "$$(dirname $$APP_PATH)" "$$(basename $$APP_PATH)"; \
 		ASSETS="$$ASSETS $$TAR_NAME"; \
-		echo "  Created: $$TAR_NAME"; \
+		echo "  Desktop: $$TAR_NAME"; \
 	fi; \
 	if [ -z "$$ASSETS" ]; then echo "  $(RED)✘ No artifacts found$(RESET)"; exit 1; fi; \
 	gh release create "v$(VERSION)" $$ASSETS \
-		--title "VibeStudio v$(VERSION)" \
-		--notes "VibeStudio desktop app v$(VERSION)" \
+		--title "v$(VERSION)" \
+		--generate-notes \
 		--latest
+	@echo ""
 	@echo "  $(GREEN)✔ Released v$(VERSION)$(RESET)"
+	@echo "  $(CYAN)https://github.com/isaacs-12/vibehub/releases/tag/v$(VERSION)$(RESET)"
+	@echo ""
+	@echo "  Don't forget to push:  git push origin main v$(VERSION)"
 
 # ── Clean ─────────────────────────────────────────────────────────────────────
 .PHONY: clean

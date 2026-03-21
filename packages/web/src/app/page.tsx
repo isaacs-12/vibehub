@@ -75,14 +75,14 @@ export default function HomePage() {
       {/* ── Hero ── */}
       <section className="py-20 text-center">
         <h1 className="text-5xl font-bold text-fg leading-tight">
-          Design software with specs.
+          git for vibes, based on intent
           <br />
-          <span className="text-accent-emphasis">Let AI write the code.</span>
+          <span className="text-accent-emphasis">the human language compiler</span>
         </h1>
         <p className="mt-4 text-lg text-fg-muted max-w-2xl mx-auto leading-relaxed">
-          VibeHub is a spec-first development platform. Define what you want in
-          plain English, review it like a PR, and let AI compile it into working
-          software &mdash; all version-controlled and forkable.
+          Code? That's so last century. VibeHub allows you to collaborate on Vibes, in
+          plain English. Make a feature, review it like a PR with diffs that highlight intent,
+          and let our bespoke AI compiler build it into working software &mdash; all version-controlled and forkable.
         </p>
 
         <div className="mt-8 flex items-center justify-center gap-4 flex-wrap">
@@ -112,14 +112,14 @@ export default function HomePage() {
           <Step
             icon={<FileText size={22} />}
             number="1"
-            title="Write specs"
-            description="Describe features in plain-English markdown files. These are your source of truth — not the code."
+            title="Write vibes"
+            description="Describe features in plain-English markdown files. These are your source of truth — not code."
           />
           <Step
             icon={<Cpu size={22} />}
             number="2"
             title="AI compiles"
-            description="An AI agent reads your specs and generates a complete, working implementation. Pick your model."
+            description="Our custom agentic AI reads your vibes and generates a complete, working implementation. Just choose your model."
           />
           <Step
             icon={<GitPullRequest size={22} />}
@@ -139,12 +139,12 @@ export default function HomePage() {
           <Differentiator
             icon={<FileText size={18} />}
             title="Decisions are first-class"
-            description="Design choices live in version-controlled spec files — reviewable, diffable, and portable."
+            description="Design choices live in our version-controlled Vibe primitive — reviewable, diffable, and portable."
           />
           <Differentiator
             icon={<Users size={18} />}
             title="Anyone can contribute"
-            description="Non-technical stakeholders read and propose changes in plain English. No code required."
+            description="Non-technical stakeholders read and propose changes in plain English. No coding required."
           />
           <Differentiator
             icon={<GitFork size={18} />}

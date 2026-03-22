@@ -385,6 +385,17 @@ build-cli-all:
 
 version-bump:
 	@if [ -z "$(VERSION)" ]; then echo "  $(RED)✘ VERSION required$(RESET)  Usage: make release VERSION=0.2.0"; exit 1; fi
+	@# Guard: VERSION must be strictly greater than the current version
+	@CURRENT=$$(grep -m1 '"version"' package.json | sed 's/.*"version": *"//;s/".*//'); \
+	if [ "$(VERSION)" = "$$CURRENT" ]; then \
+		echo "  $(RED)✘ VERSION $(VERSION) is the same as current ($$CURRENT)$(RESET)"; \
+		echo "  Bump to a higher version, e.g.: make release VERSION=$$(echo $$CURRENT | awk -F. '{print $$1"."$$2"."$$3+1}')"; \
+		exit 1; \
+	fi; \
+	if git tag -l "v$(VERSION)" | grep -q .; then \
+		echo "  $(RED)✘ Tag v$(VERSION) already exists$(RESET)"; \
+		exit 1; \
+	fi
 	@echo "  Bumping version to $(VERSION)…"
 	@for f in package.json packages/web/package.json packages/agent/package.json packages/desktop/package.json; do \
 		sed -i '' 's/"version": *"[^"]*"/"version": "$(VERSION)"/' $$f; \
@@ -398,11 +409,12 @@ release: version-bump build-cli-all build-desktop deploy-all
 	@echo ""
 	@echo "  $(BOLD)Creating release v$(VERSION)…$(RESET)"
 	@echo ""
-	@# Commit version bump + tag
+	@# Commit version bump, tag, and push
 	git add package.json packages/web/package.json packages/agent/package.json packages/desktop/package.json packages/desktop/src-tauri/tauri.conf.json
 	git commit -m "release v$(VERSION)"
 	git tag "v$(VERSION)"
-	@echo "  $(GREEN)✔ Tagged v$(VERSION)$(RESET)"
+	git push origin main "v$(VERSION)"
+	@echo "  $(GREEN)✔ Pushed main + v$(VERSION)$(RESET)"
 	@# Collect release assets
 	@ASSETS=""; \
 	for f in packages/cli/dist/vibe-*.tar.gz; do \
@@ -426,8 +438,6 @@ release: version-bump build-cli-all build-desktop deploy-all
 	@echo ""
 	@echo "  $(GREEN)✔ Released v$(VERSION)$(RESET)"
 	@echo "  $(CYAN)https://github.com/isaacs-12/vibehub/releases/tag/v$(VERSION)$(RESET)"
-	@echo ""
-	@echo "  Don't forget to push:  git push origin main v$(VERSION)"
 
 # ── Clean ─────────────────────────────────────────────────────────────────────
 .PHONY: clean

@@ -216,12 +216,19 @@ export default function HomePage() {
             Edit specs locally, run the AI compiler on your machine, and sync
             with VibeHub. Available for macOS, Windows, and Linux.
           </p>
-          <p className="mt-4 text-xs text-fg-subtle">
-            Coming soon &mdash;{' '}
-            <Link href={"/docs" as any} className="text-accent-emphasis hover:underline">
-              learn more in the docs
+          <div className="mt-6 flex items-center justify-center gap-3 flex-wrap">
+            <Link
+              href={"/download" as any}
+              className="inline-flex items-center gap-2 px-6 py-2.5 bg-accent text-white text-sm font-medium rounded-lg hover:bg-accent/80 transition-colors"
+            >
+              <Download size={15} />
+              Download for macOS
             </Link>
-          </p>
+            <span className="text-xs text-fg-subtle">or</span>
+            <code className="px-3 py-2 bg-canvas-inset border border-border rounded-lg text-xs text-fg">
+              curl -fsSL https://getvibehub.com/install.sh | sh
+            </code>
+          </div>
         </div>
       </section>
     </div>

@@ -13,10 +13,13 @@ export default function VibeStudioPage() {
           the day-to-day workflow of writing specs, previewing generated code,
           and syncing with the web.
         </p>
-        <Callout>
-          VibeStudio is currently in development. Desktop downloads will be
-          available soon.
-        </Callout>
+        <p>
+          VibeStudio is available for macOS.{' '}
+          <a href="/download" className="text-accent-emphasis hover:underline">
+            Download the latest release
+          </a>{' '}
+          or install the CLI:
+        </p>
       </Section>
 
       <Section title="Features">
@@ -47,11 +50,17 @@ export default function VibeStudioPage() {
       </Section>
 
       <Section title="Download">
-        <Callout>
-          Desktop downloads for macOS, Windows, and Linux are coming soon. Check
-          back here for direct download links.
-        </Callout>
-        {/* Build-from-source instructions will be added once the repo is public. */}
+        <p>
+          Download the latest VibeStudio DMG from the{' '}
+          <a href="/download" className="text-accent-emphasis hover:underline">
+            download page
+          </a>
+          , or install the CLI:
+        </p>
+        <CodeBlock>{`curl -fsSL https://getvibehub.com/install.sh | sh`}</CodeBlock>
+        <p>
+          Windows and Linux desktop builds are coming soon.
+        </p>
       </Section>
 
       <Section title="Authentication">

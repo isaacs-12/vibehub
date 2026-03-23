@@ -1130,6 +1130,42 @@ pub async fn push_branch_to_backend(
     let resp = req.send().await.map_err(|e| e.to_string())?;
     let status = resp.status();
     let text = resp.text().await.map_err(|e| e.to_string())?;
+
+    // If the project doesn't exist yet, create it on the remote and retry the PR push.
+    if status == reqwest::StatusCode::NOT_FOUND {
+        let create_url = format!("{}/api/projects", base);
+        let create_body = serde_json::json!({ "repo": repo });
+        let mut create_req = client.post(&create_url).json(&create_body);
+        if let Some(ref token) = auth_token {
+            create_req = create_req.header("Authorization", format!("Bearer {}", token));
+        }
+        let create_resp = create_req.send().await.map_err(|e| e.to_string())?;
+        if !create_resp.status().is_success() {
+            let ct = create_resp.text().await.map_err(|e| e.to_string())?;
+            let err: serde_json::Value = serde_json::from_str(&ct).unwrap_or(serde_json::json!({ "error": ct }));
+            let msg = err.get("error").and_then(|v| v.as_str()).unwrap_or(&ct);
+            return Err(format!("Failed to create project on remote: {}", msg));
+        }
+
+        // Retry the PR push now that the project exists
+        let mut retry_req = client.post(&url).json(&body);
+        if let Some(ref token) = auth_token {
+            retry_req = retry_req.header("Authorization", format!("Bearer {}", token));
+        }
+        let retry_resp = retry_req.send().await.map_err(|e| e.to_string())?;
+        let retry_status = retry_resp.status();
+        let retry_text = retry_resp.text().await.map_err(|e| e.to_string())?;
+        if !retry_status.is_success() {
+            let err: serde_json::Value = serde_json::from_str(&retry_text).unwrap_or(serde_json::json!({ "error": retry_text }));
+            let msg = err.get("error").and_then(|v| v.as_str()).unwrap_or(&retry_text);
+            return Err(format!("{}: {}", retry_status, msg));
+        }
+        let pr: serde_json::Value = serde_json::from_str(&retry_text).map_err(|e| e.to_string())?;
+        let pr_id = pr.get("id").and_then(|v| v.as_str()).ok_or("API did not return pr id")?;
+        let pr_url = format!("{}/{}/{}/pulls/{}", base, owner, repo, pr_id);
+        return Ok(PushResult { pr_id: pr_id.to_string(), url: pr_url });
+    }
+
     if !status.is_success() {
         let err: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({ "error": text }));
         let msg = err.get("error").and_then(|v| v.as_str()).unwrap_or(&text);

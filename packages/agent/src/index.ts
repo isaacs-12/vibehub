@@ -23,7 +23,7 @@
 
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { runCompileJob, type CompileEvent, type ModelConfig } from './agent.ts';
+import { runCompileJob, runIdeateAndCompile, type CompileEvent, type ModelConfig } from './agent.ts';
 
 const PORT = Number(process.env.PORT ?? 8080);
 const API_URL = (process.env.VIBEHUB_API_URL ?? 'http://localhost:3000').replace(/\/$/, '');
@@ -44,7 +44,7 @@ async function pollOnce() {
     return;
   }
 
-  const { job, pr } = await res.json() as {
+  const { job, pr, project } = await res.json() as {
     job: {
       id: string;
       prId: string;
@@ -54,7 +54,14 @@ async function pollOnce() {
       apiKey?: string;
       keySource?: string;
     };
-    pr: { intentDiff?: { headFeatures?: { path: string; content: string }[] } } | null;
+    pr: {
+      title?: string;
+      intentDiff?: { headFeatures?: { path: string; content: string }[] };
+    } | null;
+    project: {
+      description?: string;
+      framework?: string | null;
+    } | null;
   };
 
   console.log(`[agent] picked up job ${job.id} for PR ${job.prId} (model: ${job.model ?? 'default'})`);
@@ -99,7 +106,24 @@ async function pollOnce() {
       }
     };
 
-    const proofs = await runCompileJob(pr?.intentDiff?.headFeatures ?? [], onProgress, modelConfig);
+    const headFeatures = pr?.intentDiff?.headFeatures ?? [];
+    const needsIdeation = headFeatures.length === 0;
+    // Description comes from the PR title (user's change prompt) or the project description
+    const description = pr?.title || project?.description || '';
+
+    let proofs: { path: string; content: string }[];
+    let generatedVibes: { path: string; content: string }[] | undefined;
+
+    if (needsIdeation && description) {
+      // Full pipeline: description → vibe features → code
+      const result = await runIdeateAndCompile(description, project?.framework, onProgress, modelConfig);
+      proofs = result.code;
+      generatedVibes = result.vibeFeatures;
+    } else {
+      // Normal pipeline: existing vibe features → code
+      proofs = await runCompileJob(headFeatures, onProgress, modelConfig);
+    }
+
     // Flush any remaining events before reporting completion
     if (flushTimer) clearTimeout(flushTimer);
     await flushEvents();
@@ -111,9 +135,11 @@ async function pollOnce() {
         prId: job.prId,
         model: job.model ?? 'unknown',
         implementationProofs: proofs,
+        // Send generated vibes back so the backend can save them into the PR
+        ...(generatedVibes ? { generatedVibes } : {}),
       }),
     });
-    console.log(`[agent] job ${job.id} completed — ${proofs.length} file(s)`);
+    console.log(`[agent] job ${job.id} completed — ${proofs.length} file(s)${generatedVibes ? `, ${generatedVibes.length} vibe(s)` : ''}`);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[agent] job ${job.id} failed: ${msg}`);

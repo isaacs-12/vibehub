@@ -100,7 +100,7 @@ export default async function VibePRPage({ params }: Props) {
           <span>Generated code</span>
           <span className="bg-canvas-subtle border border-border text-xs px-1.5 py-0.5 rounded ml-1">AI-generated</span>
         </div>
-        {compileJob && (compileJob.status === 'pending' || compileJob.status === 'running') && (
+        {compileJob && (
           <div className="mb-4">
             <CompileProgress jobId={compileJob.id} initialStatus={compileJob.status} />
           </div>

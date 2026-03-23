@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { Loader2, CheckCircle2, XCircle, Cpu, FileCode, Wrench, TestTube2, Clock, Timer } from 'lucide-react';
+import { Loader2, CheckCircle2, XCircle, Cpu, FileCode, Wrench, TestTube2, Clock, Timer, Sparkles } from 'lucide-react';
 
 const COMPILE_BUDGET_S = 12 * 60; // 12 minutes — matches agent budget
 
@@ -113,7 +113,11 @@ export default function CompileProgress({ jobId, initialStatus }: Props) {
         {status === 'running' && (
           <>
             <Loader2 size={14} className="animate-spin text-accent-emphasis" />
-            <span className="text-accent-emphasis font-medium">Compiling...</span>
+            <span className="text-accent-emphasis font-medium">
+              {events.some((e) => e.type === 'ideation_start') && !events.some((e) => e.type === 'compile_start')
+                ? 'Designing features...'
+                : 'Compiling...'}
+            </span>
           </>
         )}
         {status === 'completed' && (
@@ -187,6 +191,22 @@ function EventLine({ event }: { event: CompileJobEvent }) {
   const slug = (event.slug as string) ?? '';
 
   switch (event.type) {
+    case 'ideation_start':
+      return (
+        <div className="flex items-center gap-2 text-accent-emphasis">
+          <Sparkles size={12} />
+          <span>Decomposing description into feature specs...</span>
+        </div>
+      );
+    case 'ideation_done':
+      return (
+        <div className="flex items-center gap-2 text-success">
+          <CheckCircle2 size={12} />
+          <span>
+            Generated {event.featureCount as number} feature spec(s): {(event.features as string[])?.join(', ')}
+          </span>
+        </div>
+      );
     case 'compile_start':
       return (
         <div className="flex items-center gap-2 text-fg-muted">

@@ -56,7 +56,13 @@ export default function NewProjectPage() {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error ?? `Server error ${res.status}`);
       }
-      router.push(`/${handle}/${repo.trim()}`);
+      const data = await res.json();
+      // If an initial PR was auto-created, go straight to the compile progress page
+      if (data.initialPrId) {
+        router.push(`/${handle}/${repo.trim()}/pulls/${data.initialPrId}`);
+      } else {
+        router.push(`/${handle}/${repo.trim()}`);
+      }
     } catch (err) {
       setError(String(err));
       setLoading(false);

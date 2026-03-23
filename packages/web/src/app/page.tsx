@@ -52,7 +52,14 @@ export default function HomePage() {
         body: JSON.stringify({ repo, description: prompt.trim() }),
       });
       if (res.ok) {
-        router.push(`/${handle}/${repo}`);
+        const data = await res.json();
+        // If an initial PR was auto-created, go straight to it so the user
+        // can watch the ideation + compile progress in real time.
+        if (data.initialPrId) {
+          router.push(`/${handle}/${repo}/pulls/${data.initialPrId}`);
+        } else {
+          router.push(`/${handle}/${repo}`);
+        }
       } else {
         setCreating(false);
       }

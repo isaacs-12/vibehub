@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getStore } from '@/lib/data/store';
+import type { CompileJob } from '@/lib/data/store';
+import { COMPILE_LIMITS } from '@/lib/data/store';
 import { requireAuth, isAuthError } from '@/lib/auth-middleware';
+import { resolveCompileModel } from '@/lib/resolve-compile-model';
 
 export async function GET() {
   try {
@@ -75,7 +78,47 @@ export async function POST(request: Request) {
       });
     }
 
-    return NextResponse.json(project, { status: 201 });
+    // Auto-create an initial PR + compile job when a description is provided
+    // so the agent can ideate features and compile code automatically.
+    let initialPrId: string | null = null;
+    if (project.description && features.length === 0) {
+      const pr = {
+        id: crypto.randomUUID(),
+        projectId: project.id,
+        title: project.description,
+        author: user.handle,
+        status: 'open' as const,
+        headBranch: 'feature/initial',
+        decisionsChanged: 0,
+        createdAt: now,
+        updatedAt: now,
+        intentDiff: undefined,
+      };
+      await store.upsertPR(pr);
+      initialPrId = pr.id;
+
+      // Enqueue compile job (same logic as PR creation route)
+      const resolved = await resolveCompileModel(user.id);
+      const activeJobs = await store.countActiveJobsForUser(user.id);
+      const limit = resolved.keySource === 'user' ? COMPILE_LIMITS.user : COMPILE_LIMITS.platform;
+      if (activeJobs < limit) {
+        const job: CompileJob = {
+          id: crypto.randomUUID(),
+          prId: pr.id,
+          status: 'pending',
+          model: resolved.model,
+          fastModel: resolved.fastModel,
+          provider: resolved.provider,
+          keySource: resolved.keySource,
+          apiKey: resolved.apiKey,
+          userId: user.id,
+          createdAt: now,
+        };
+        await store.createCompileJob(job);
+      }
+    }
+
+    return NextResponse.json({ ...project, initialPrId }, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('POST /api/projects failed:', err);

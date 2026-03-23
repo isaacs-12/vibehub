@@ -45,18 +45,52 @@ export async function PATCH(req: Request, { params }: Params) {
     const proofs: { path: string; content: string }[] = Array.isArray(body.implementationProofs)
       ? body.implementationProofs
       : [];
+    const generatedVibes: { path: string; content: string }[] = Array.isArray(body.generatedVibes)
+      ? body.generatedVibes
+      : [];
     const model: string = body.model ?? 'unknown';
 
     await store.updateCompileJob(params.id, { status: 'completed', completedAt: now });
 
-    // Merge proofs into the PR's intentDiff
+    // Merge proofs (and generated vibes) into the PR's intentDiff
     const pr = await store.getPR(body.prId);
     if (pr) {
-      if (proofs.length > 0) {
+      const updatedDiff = { ...pr.intentDiff };
+      if (proofs.length > 0) updatedDiff.implementationProofs = proofs;
+      if (generatedVibes.length > 0) updatedDiff.headFeatures = generatedVibes;
+
+      if (proofs.length > 0 || generatedVibes.length > 0) {
         await store.upsertPR({
           ...pr,
           updatedAt: now,
-          intentDiff: { ...pr.intentDiff, implementationProofs: proofs },
+          intentDiff: updatedDiff,
+        });
+      }
+
+      // If the agent generated vibes (ideation), persist them as project features + snapshot
+      if (generatedVibes.length > 0) {
+        const featureRecords = generatedVibes.map((f) => ({
+          id: crypto.randomUUID(),
+          projectId: pr.projectId,
+          name: f.path.replace(/^\.vibe\/features\//, '').replace(/\.md$/, ''),
+          slug: f.path.replace(/^\.vibe\/features\//, '').replace(/\.md$/, ''),
+          content: f.content,
+          createdAt: now,
+          updatedAt: now,
+        }));
+        for (const feat of featureRecords) {
+          await store.upsertFeature(feat);
+        }
+        await store.createSnapshot({
+          id: crypto.randomUUID(),
+          projectId: pr.projectId,
+          version: 0,
+          features: featureRecords.map((f) => ({ slug: f.slug, content: f.content })),
+          message: 'Initial features from ideation',
+          author: pr.author ?? 'ai',
+          parentSnapshotId: null,
+          forkedFromSnapshotId: null,
+          createdAt: now,
         });
       }
 

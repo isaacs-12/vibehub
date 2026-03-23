@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "clean": "cargo clean --manifest-path src-tauri/Cargo.toml --profile dev && rm -rf dist"
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.2.5",

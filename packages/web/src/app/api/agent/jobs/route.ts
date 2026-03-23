@@ -22,10 +22,21 @@ function checkAuth(req: Request): boolean {
 /** Claim the next pending job. Returns 204 if queue is empty. */
 export async function GET(req: Request) {
   if (!checkAuth(req)) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const job = await getStore().claimNextPendingJob();
+  const store = getStore();
+  const job = await store.claimNextPendingJob();
   if (!job) return new NextResponse(null, { status: 204 });
 
   // Attach the PR so the agent has the vibe files without a second request
-  const pr = await getStore().getPR(job.prId);
-  return NextResponse.json({ job, pr });
+  const pr = await store.getPR(job.prId);
+
+  // Attach the project so the agent can access description + framework for ideation
+  let project: { description?: string; framework?: string | null } | null = null;
+  if (pr) {
+    const fullProject = await store.getProjectById(pr.projectId);
+    if (fullProject) {
+      project = { description: fullProject.description, framework: fullProject.framework ?? null };
+    }
+  }
+
+  return NextResponse.json({ job, pr, project });
 }

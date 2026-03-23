@@ -63,6 +63,8 @@ export interface CodeFile {
 // ─── Progress events ────────────────────────────────────────────────────────
 
 export type CompileEvent =
+  | { type: 'ideation_start'; description: string }
+  | { type: 'ideation_done'; featureCount: number; features: string[] }
   | { type: 'compile_start'; features: string[]; order: string[]; generationModel: string; validationModel: string }
   | { type: 'feature_start'; slug: string; index: number; total: number }
   | { type: 'phase1_start'; slug: string }
@@ -128,6 +130,50 @@ You may be validating one feature in a multi-feature project. Code from previous
 - Don't add dependencies that weren't in the original generation.
 - Don't modify test files to make them pass — fix the implementation.
 - Don't call finish until the build is clean.`;
+
+// ─── Ideation prompt ─────────────────────────────────────────────────────────
+
+const IDEATION_SYSTEM_PROMPT = `You are an expert software architect who decomposes high-level product descriptions into well-structured Vibe feature specs.
+
+## Your task
+Given a product description (and optionally a framework preference), output a set of \`.vibe/features/*.md\` files that fully cover the described product.
+
+## Vibe spec format
+Each feature spec is a markdown file with YAML frontmatter:
+
+\`\`\`markdown
+---
+Uses: [DependencyFeature]
+Data: [Entity1, Entity2]
+Never:
+  - Hard constraint
+---
+
+# Feature Title
+
+Description of what this feature does and how it works.
+
+## Key behaviors
+- Behavior 1
+- Behavior 2
+
+## UI / API surface
+- Endpoint or page description
+\`\`\`
+
+## Rules
+1. **PascalCase names** for Uses/Data references (e.g., UserAuthentication, not user-authentication)
+2. **Slug file names** use kebab-case (e.g., \`user-authentication.md\`)
+3. **Uses:** declares dependencies on other features you're creating. Order matters — a feature can only depend on features that would logically exist independently.
+4. **Data:** declares domain entities this feature introduces or touches
+5. **Never:** hard constraints the AI compiler must respect
+6. **Be specific** — include enough detail that a developer (or AI) could implement each feature without guessing
+7. **Decompose thoughtfully** — each feature should be a cohesive unit. Don't make features too granular (1 endpoint) or too broad (entire app).
+8. **3-7 features** is typical for a medium-complexity app
+
+## Output format
+Call the \`create_feature\` tool once for each feature you want to create. The slug becomes the filename (e.g., slug "user-auth" → \`.vibe/features/user-auth.md\`).
+When you're done creating all features, call the \`finish\` tool.`;
 
 // ─── Provider abstraction ──────────────────────────────────────────────────────
 
@@ -346,7 +392,118 @@ function topologicalSort(features: FeatureNode[]): FeatureNode[] {
   return sorted;
 }
 
+// ─── Ideation: description → vibe features ─────────────────────────────────────
+
+const IDEATION_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'create_feature',
+    description: 'Create a vibe feature spec file. Call once per feature.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        slug: {
+          type: 'string',
+          description: 'Kebab-case filename slug (e.g. "user-authentication"). Becomes .vibe/features/<slug>.md',
+        },
+        content: {
+          type: 'string',
+          description: 'Full markdown content including YAML frontmatter (---\\nUses: [...]\\n...\\n---\\n# Title\\n...)',
+        },
+      },
+      required: ['slug', 'content'],
+    },
+  },
+  {
+    name: 'finish',
+    description: 'Call when all features have been created.',
+    input_schema: { type: 'object' as const, properties: {} },
+  },
+];
+
+/**
+ * Use an LLM to decompose a natural-language description into vibe feature specs.
+ */
+async function ideateFeatures(
+  provider: LLMProvider,
+  description: string,
+  framework: string | null | undefined,
+  onProgress: OnProgress,
+): Promise<CodeFile[]> {
+  onProgress({ type: 'ideation_start', description });
+
+  const userPrompt = [
+    `## Product Description\n${description}`,
+    framework ? `\n## Framework\nUse ${framework} as the primary framework.` : '',
+    '\nDecompose this into vibe feature specs. Create each feature with the create_feature tool, then call finish.',
+  ].join('');
+
+  const messages: Anthropic.MessageParam[] = [{ role: 'user', content: userPrompt }];
+  const features: CodeFile[] = [];
+
+  for (let i = 0; i < PHASE1_MAX_ITERATIONS; i++) {
+    const res = await provider.createMessage(IDEATION_SYSTEM_PROMPT, messages, IDEATION_TOOLS);
+
+    // Collect assistant response
+    messages.push({ role: 'assistant', content: res.content });
+
+    const toolUses = res.content.filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
+    if (toolUses.length === 0) break; // model stopped calling tools
+
+    const toolResults: Anthropic.ToolResultBlockParam[] = [];
+    let finished = false;
+    for (const tu of toolUses) {
+      if (tu.name === 'finish') {
+        finished = true;
+        toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: 'Done.' });
+      } else if (tu.name === 'create_feature') {
+        const input = tu.input as { slug: string; content: string };
+        const filePath = `.vibe/features/${input.slug}.md`;
+        features.push({ path: filePath, content: input.content });
+        toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: `Created ${filePath}` });
+      }
+    }
+    messages.push({ role: 'user', content: toolResults });
+    if (finished) break;
+  }
+
+  onProgress({
+    type: 'ideation_done',
+    featureCount: features.length,
+    features: features.map((f) => f.path.replace(/^\.vibe\/features\//, '').replace(/\.md$/, '')),
+  });
+
+  return features;
+}
+
 // ─── Public API ────────────────────────────────────────────────────────────────
+
+/**
+ * Ideate vibe features from a description, then compile them into code.
+ *
+ * This is the full "description → vibes → code" pipeline used when a user
+ * creates a project from a natural-language prompt without pre-existing features.
+ *
+ * @returns An object with both the generated vibe features and implementation code.
+ */
+export async function runIdeateAndCompile(
+  description: string,
+  framework: string | null | undefined,
+  onProgress: OnProgress = noopProgress,
+  modelConfig?: ModelConfig,
+): Promise<{ vibeFeatures: CodeFile[]; code: CodeFile[] }> {
+  const genModel = modelConfig?.generationModel ?? DEFAULT_GENERATION_MODEL;
+  const apiKey = modelConfig?.apiKey;
+  const genProvider = createProvider(genModel, apiKey);
+
+  const vibeFeatures = await ideateFeatures(genProvider, description, framework, onProgress);
+
+  if (vibeFeatures.length === 0) {
+    return { vibeFeatures: [], code: [] };
+  }
+
+  const code = await runCompileJob(vibeFeatures, onProgress, modelConfig);
+  return { vibeFeatures, code };
+}
 
 /**
  * Compile vibe feature specs into working code.

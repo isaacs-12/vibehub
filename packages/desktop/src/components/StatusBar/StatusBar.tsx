@@ -5,7 +5,7 @@ import { useGit } from '../../hooks/useGit.ts';
 import { startLogin, getLoginUrl, handleAuthDeepLink } from '../../lib/auth.ts';
 
 export default function StatusBar() {
-  const { currentBranch, branches, projectRoot, codePeekFiles, chatSessions, setChatSessions, setFeatures, authUser, clearAuth } = useVibeStore();
+  const { currentBranch, branches, projectRoot, codePeekFiles, chatSessions, setChatSessions, setFeatures, authUser, authToken, clearAuth } = useVibeStore();
   const { switchBranch, createBranch } = useGit();
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
   const [newBranchOpen, setNewBranchOpen] = useState(false);
@@ -97,6 +97,7 @@ export default function StatusBar() {
     return invoke<{ pr_id: string; url: string }>('push_branch_to_backend', {
       root: projectRoot,
       implementationProofs: codePeekFiles.length > 0 ? codePeekFiles : null,
+      authToken: authToken ?? null,
     });
   }
 
@@ -163,7 +164,7 @@ export default function StatusBar() {
     setPullLoading(true);
     try {
       const { invoke } = await import('@tauri-apps/api/core');
-      const pulled = await invoke<Array<{ name: string; path: string; content: string }>>('pull_from_remote', { root: projectRoot });
+      const pulled = await invoke<Array<{ name: string; path: string; content: string }>>('pull_from_remote', { root: projectRoot, authToken: authToken ?? null });
       setFeatures(pulled.map((f) => ({ name: f.name, path: f.path, content: f.content })));
       const { message } = await import('@tauri-apps/plugin-dialog');
       await message(`Pulled ${pulled.length} vibe file${pulled.length !== 1 ? 's' : ''} from main.`, { title: 'Pull', kind: 'info' });

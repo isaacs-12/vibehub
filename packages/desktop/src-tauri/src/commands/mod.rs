@@ -1041,6 +1041,7 @@ fn get_base_feature_contents(repo: &git2::Repository) -> HashMap<String, String>
 pub async fn push_branch_to_backend(
     root: String,
     implementation_proofs: Option<Vec<CodeFile>>,
+    auth_token: Option<String>,
 ) -> Result<PushResult, String> {
     let root_path = PathBuf::from(&root);
     let remote_path = root_path.join(".vibe").join("remote.json");
@@ -1122,12 +1123,11 @@ pub async fn push_branch_to_backend(
 
     let url = format!("{}/api/projects/{}/{}/prs", base, owner, repo);
     let client = reqwest::Client::new();
-    let resp = client
-        .post(&url)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let mut req = client.post(&url).json(&body);
+    if let Some(ref token) = auth_token {
+        req = req.header("Authorization", format!("Bearer {}", token));
+    }
+    let resp = req.send().await.map_err(|e| e.to_string())?;
     let status = resp.status();
     let text = resp.text().await.map_err(|e| e.to_string())?;
     if !status.is_success() {
@@ -1145,7 +1145,7 @@ pub async fn push_branch_to_backend(
 /// Overwrites local .vibe/features/ with the merged state, then commits to git.
 /// Returns the refreshed list of local feature files.
 #[tauri::command]
-pub async fn pull_from_remote(root: String) -> Result<Vec<VibeFileEntry>, String> {
+pub async fn pull_from_remote(root: String, auth_token: Option<String>) -> Result<Vec<VibeFileEntry>, String> {
     let root_path = PathBuf::from(&root);
     let remote_path = root_path.join(".vibe").join("remote.json");
     let raw = fs::read_to_string(&remote_path)
@@ -1159,7 +1159,11 @@ pub async fn pull_from_remote(root: String) -> Result<Vec<VibeFileEntry>, String
     // Fetch merged feature files from the web backend
     let url = format!("{}/api/projects/{}/{}/features", base, owner, repo);
     let client = reqwest::Client::new();
-    let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
+    let mut req = client.get(&url);
+    if let Some(ref token) = auth_token {
+        req = req.header("Authorization", format!("Bearer {}", token));
+    }
+    let resp = req.send().await.map_err(|e| e.to_string())?;
     let status = resp.status();
     let text = resp.text().await.map_err(|e| e.to_string())?;
     if !status.is_success() {

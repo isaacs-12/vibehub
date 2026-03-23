@@ -36,6 +36,13 @@ export async function PATCH(
     }
     project.visibility = body.visibility;
   }
+  if (body.listed !== undefined) {
+    project.listed = !!body.listed;
+    // Private/unlisted projects cannot be listed — silently unset
+    if (project.visibility !== 'public') {
+      project.listed = false;
+    }
+  }
   if (body.description !== undefined) {
     project.description = body.description;
   }

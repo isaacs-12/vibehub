@@ -42,6 +42,7 @@ export async function POST(request: Request) {
       forkedFromId: body.forkedFromId ?? null,
       compiledWith: body.compiledWith ?? null,
       visibility: (body.visibility ?? 'public') as 'public' | 'unlisted' | 'private',
+      listed: false,
       starCount: 0,
       forkCount: 0,
       createdAt: now,

@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, integer, jsonb, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, integer, boolean, jsonb, uniqueIndex } from 'drizzle-orm/pg-core';
 
 // ─── Users & Auth ────────────────────────────────────────────────────────────
 
@@ -35,6 +35,7 @@ export const projects = pgTable('projects', {
   framework: text('framework'),               // nextjs | vite | express | fastapi | flask | null
   compiledWith: text('compiled_with'),        // model used for last compile (e.g. "claude-opus-4")
   visibility: text('visibility').notNull().default('public'), // public | unlisted | private
+  listed: boolean('listed').notNull().default(false),        // appears in Explore marketplace
   starCount: integer('star_count').notNull().default(0),
   forkCount: integer('fork_count').notNull().default(0),
   createdAt: timestamp('created_at').defaultNow().notNull(),

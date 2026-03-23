@@ -6,9 +6,9 @@ import { getStore } from '@/lib/data/store';
 export default async function ExplorePage() {
   const projects = await getStore().listProjects();
 
-  // Only show public projects, sorted by stars then recency
+  // Only show projects that are both public and explicitly listed by their owner
   const visible = projects
-    .filter((p) => p.visibility === 'public')
+    .filter((p) => p.visibility === 'public' && p.listed)
     .sort((a, b) => b.starCount - a.starCount || b.updatedAt.localeCompare(a.updatedAt));
 
   return (

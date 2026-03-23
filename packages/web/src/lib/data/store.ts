@@ -35,6 +35,8 @@ export interface Project {
   forkedFromId?: string | null;   // project ID this was forked from
   compiledWith?: string | null;   // model used for last compile
   visibility: 'public' | 'unlisted' | 'private';
+  /** Whether this project appears in the Explore marketplace. Only meaningful when visibility is 'public'. */
+  listed: boolean;
   starCount: number;
   forkCount: number;
   createdAt: string;   // ISO
@@ -480,6 +482,7 @@ class FileStore implements Store {
       forkedFromId: sourceId,
       compiledWith: source.compiledWith,
       visibility: 'public',
+      listed: false,
       starCount: 0,
       forkCount: 0,
       createdAt: now,
@@ -633,7 +636,7 @@ class PostgresStore implements Store {
     const db = await this.db();
     const { projects } = await this.schema();
     const rows = await db.select().from(projects).where(eq(projects.owner, handle));
-    return rows.map((r) => ({ ...r, description: r.description ?? '', visibility: (r.visibility ?? 'public') as Project['visibility'], starCount: r.starCount ?? 0, forkCount: r.forkCount ?? 0, createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString() }));
+    return rows.map((r) => ({ ...r, description: r.description ?? '', visibility: (r.visibility ?? 'public') as Project['visibility'], listed: r.listed ?? false, starCount: r.starCount ?? 0, forkCount: r.forkCount ?? 0, createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString() }));
   }
 
   async getProject(owner: string, repo: string): Promise<Project | null> {
@@ -646,7 +649,7 @@ class PostgresStore implements Store {
       .where(and(eq(projects.owner, owner), eq(projects.repo, repo)))
       .limit(1);
     if (!row) return null;
-    return { ...row, description: row.description ?? '', visibility: (row.visibility ?? 'public') as Project['visibility'], starCount: row.starCount ?? 0, forkCount: row.forkCount ?? 0, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
+    return { ...row, description: row.description ?? '', visibility: (row.visibility ?? 'public') as Project['visibility'], listed: row.listed ?? false, starCount: row.starCount ?? 0, forkCount: row.forkCount ?? 0, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
   }
 
   async getProjectById(id: string): Promise<Project | null> {
@@ -655,14 +658,14 @@ class PostgresStore implements Store {
     const { projects } = await this.schema();
     const [row] = await db.select().from(projects).where(eq(projects.id, id)).limit(1);
     if (!row) return null;
-    return { ...row, description: row.description ?? '', visibility: (row.visibility ?? 'public') as Project['visibility'], starCount: row.starCount ?? 0, forkCount: row.forkCount ?? 0, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
+    return { ...row, description: row.description ?? '', visibility: (row.visibility ?? 'public') as Project['visibility'], listed: row.listed ?? false, starCount: row.starCount ?? 0, forkCount: row.forkCount ?? 0, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
   }
 
   async listProjects(): Promise<Project[]> {
     const db = await this.db();
     const { projects } = await this.schema();
     const rows = await db.select().from(projects);
-    return rows.map((r) => ({ ...r, description: r.description ?? '', visibility: (r.visibility ?? 'public') as Project['visibility'], starCount: r.starCount ?? 0, forkCount: r.forkCount ?? 0, createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString() }));
+    return rows.map((r) => ({ ...r, description: r.description ?? '', visibility: (r.visibility ?? 'public') as Project['visibility'], listed: r.listed ?? false, starCount: r.starCount ?? 0, forkCount: r.forkCount ?? 0, createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString() }));
   }
 
   async upsertProject(p: Project): Promise<void> {
@@ -673,7 +676,8 @@ class PostgresStore implements Store {
       id: p.id, owner: p.owner, repo: p.repo, description: p.description,
       framework: p.framework ?? null,
       forkedFromId: p.forkedFromId ?? null, compiledWith: p.compiledWith ?? null,
-      visibility: p.visibility ?? 'public', starCount: p.starCount ?? 0, forkCount: p.forkCount ?? 0,
+      visibility: p.visibility ?? 'public', listed: p.listed ?? false,
+      starCount: p.starCount ?? 0, forkCount: p.forkCount ?? 0,
       createdAt: new Date(p.createdAt), updatedAt: new Date(p.updatedAt),
     }).onConflictDoUpdate({
       target: projects.id,
@@ -682,6 +686,7 @@ class PostgresStore implements Store {
         framework: p.framework ?? null,
         compiledWith: p.compiledWith ?? null,
         visibility: p.visibility ?? 'public',
+        listed: p.listed ?? false,
         starCount: p.starCount ?? 0,
         forkCount: p.forkCount ?? 0,
         updatedAt: new Date(p.updatedAt),

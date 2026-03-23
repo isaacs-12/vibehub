@@ -30,7 +30,7 @@ export default async function SettingsPage({ params }: Props) {
 
       <div className="space-y-8">
         <ProjectDetails owner={owner} repo={repo} description={project.description} />
-        <VisibilitySettings owner={owner} repo={repo} currentVisibility={project.visibility} />
+        <VisibilitySettings owner={owner} repo={repo} currentVisibility={project.visibility} currentListed={project.listed ?? false} />
         <ProviderConfig />
         <ImportJobs owner={owner} repo={repo} />
       </div>

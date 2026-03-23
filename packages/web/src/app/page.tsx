@@ -2,6 +2,7 @@
 
 import React, { useState, useRef } from 'react';
 import AuroraBackground from '@/components/AuroraBackground';
+import SignInModal from '@/components/SignInModal';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
@@ -23,11 +24,19 @@ export default function HomePage() {
   const { data: session } = useSession();
   const [prompt, setPrompt] = useState('');
   const [creating, setCreating] = useState(false);
+  const [showSignIn, setShowSignIn] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     if (!prompt.trim() || creating) return;
+
+    // Require sign-in before creating a project
+    if (!session) {
+      setShowSignIn(true);
+      return;
+    }
+
     setCreating(true);
 
     const stopWords = new Set([
@@ -239,6 +248,7 @@ export default function HomePage() {
         </div>
       </section>
     </div>
+    {showSignIn && <SignInModal onClose={() => setShowSignIn(false)} />}
     </>
   );
 }

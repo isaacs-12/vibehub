@@ -118,6 +118,8 @@ pub struct ChatHistoryEntry {
 pub struct PushResult {
     pub pr_id: String,
     pub url: String,
+    /// true if an existing PR was updated, false if a new one was created
+    pub updated: bool,
 }
 
 // ─── File System Commands ─────────────────────────────────────────────────────
@@ -243,6 +245,9 @@ pub async fn get_mapped_code(
         None => return Ok(vec![]),
     };
 
+    const MAX_FILE_CHARS: usize = 100_000;
+    const MAX_FILES: usize = 30;
+
     let mut files = Vec::new();
     for pattern in &globs {
         // Simple directory/file match (no full glob expansion for MVP)
@@ -251,7 +256,7 @@ pub async fn get_mapped_code(
             let content = fs::read_to_string(&candidate).unwrap_or_default();
             files.push(CodeFile {
                 path: pattern.clone(),
-                content: content.chars().take(4000).collect(),
+                content: content.chars().take(MAX_FILE_CHARS).collect(),
             });
         } else if candidate.is_dir() {
             for entry in WalkDir::new(&candidate).max_depth(2) {
@@ -265,17 +270,17 @@ pub async fn get_mapped_code(
                                 .unwrap_or_default();
                             files.push(CodeFile {
                                 path: rel,
-                                content: content.chars().take(4000).collect(),
+                                content: content.chars().take(MAX_FILE_CHARS).collect(),
                             });
                         }
                     }
                 }
-                if files.len() >= 10 {
+                if files.len() >= MAX_FILES {
                     break;
                 }
             }
         }
-        if files.len() >= 10 {
+        if files.len() >= MAX_FILES {
             break;
         }
     }
@@ -1163,7 +1168,8 @@ pub async fn push_branch_to_backend(
         let pr: serde_json::Value = serde_json::from_str(&retry_text).map_err(|e| e.to_string())?;
         let pr_id = pr.get("id").and_then(|v| v.as_str()).ok_or("API did not return pr id")?;
         let pr_url = format!("{}/{}/{}/pulls/{}", base, owner, repo, pr_id);
-        return Ok(PushResult { pr_id: pr_id.to_string(), url: pr_url });
+        // Retry after project creation is always a new PR (201)
+        return Ok(PushResult { pr_id: pr_id.to_string(), url: pr_url, updated: false });
     }
 
     if !status.is_success() {
@@ -1174,7 +1180,8 @@ pub async fn push_branch_to_backend(
     let pr: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
     let pr_id = pr.get("id").and_then(|v| v.as_str()).ok_or("API did not return pr id")?;
     let pr_url = format!("{}/{}/{}/pulls/{}", base, owner, repo, pr_id);
-    Ok(PushResult { pr_id: pr_id.to_string(), url: pr_url })
+    // 200 = updated existing PR, 201 = created new PR
+    Ok(PushResult { pr_id: pr_id.to_string(), url: pr_url, updated: status.as_u16() == 200 })
 }
 
 /// Pull the current main-branch vibe files from the web backend.

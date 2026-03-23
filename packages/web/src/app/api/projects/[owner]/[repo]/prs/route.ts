@@ -50,15 +50,24 @@ export async function POST(request: Request, { params }: Params) {
     : [];
 
   const hasIntent = features.length > 0 || implementationProofs.length > 0;
+
+  const store = getStore();
+
+  // Look for an existing open PR on the same branch to update instead of creating a duplicate
+  const existingPRs = await store.listPRs(project.id);
+  const existingPR = existingPRs.find(
+    (p) => p.headBranch === headBranch && p.status === 'open',
+  );
+
   const pr = {
-    id: crypto.randomUUID(),
+    id: existingPR?.id ?? crypto.randomUUID(),
     projectId: project.id,
     title: body.title,
-    author: user.handle,
+    author: existingPR?.author ?? user.handle,
     status: 'open' as const,
     headBranch,
     decisionsChanged: body.decisionsChanged ?? features.length,
-    createdAt: now,
+    createdAt: existingPR?.createdAt ?? now,
     updatedAt: now,
     intentDiff: hasIntent ? {
       baseFeatures: baseFeatures.length > 0 ? baseFeatures : undefined,
@@ -67,7 +76,6 @@ export async function POST(request: Request, { params }: Params) {
     } : undefined,
   };
 
-  const store = getStore();
   await store.upsertPR(pr);
 
   // Fire semantic intent diff computation asynchronously (don't block PR creation)
@@ -136,5 +144,5 @@ export async function POST(request: Request, { params }: Params) {
   };
   await store.createCompileJob(job);
 
-  return NextResponse.json(pr, { status: 201 });
+  return NextResponse.json(pr, { status: existingPR ? 200 : 201 });
 }

@@ -25,20 +25,17 @@ export async function POST(req: Request, { params }: Params) {
     return NextResponse.json({ error: 'No head features to diff' }, { status: 400 });
   }
 
-  // Check for force-recompute
-  const body = await req.json().catch(() => null);
-  const force = body?.force === true;
-
   // Return cached if available
-  if (!force && pr.intentDiff?.semanticDiff) {
+  if (pr.intentDiff?.semanticDiff) {
     return NextResponse.json(pr.intentDiff.semanticDiff);
   }
 
-  // Compute fresh
+  // Not yet computed — compute once and cache.
+  // This handles the race where a viewer loads the page before the
+  // async job from PR creation has finished.
   try {
     const result = await computeIntentDiff(base, head);
 
-    // Cache on the PR record
     await store.upsertPR({
       ...pr,
       updatedAt: new Date().toISOString(),

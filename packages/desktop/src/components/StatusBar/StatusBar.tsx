@@ -94,7 +94,7 @@ export default function StatusBar() {
   async function doPush() {
     if (!projectRoot) return null;
     const { invoke } = await import('@tauri-apps/api/core');
-    return invoke<{ pr_id: string; url: string }>('push_branch_to_backend', {
+    return invoke<{ pr_id: string; url: string; updated: boolean }>('push_branch_to_backend', {
       root: projectRoot,
       implementationProofs: codePeekFiles.length > 0 ? codePeekFiles : null,
       authToken: authToken ?? null,
@@ -108,7 +108,7 @@ export default function StatusBar() {
       const result = await doPush();
       if (result) {
         const { message } = await import('@tauri-apps/plugin-dialog');
-        await message(`PR created:\n${result.url}`, { title: 'Push', kind: 'info' });
+        await message(`${result.updated ? 'PR updated' : 'PR created'}:\n${result.url}`, { title: 'Push', kind: 'info' });
       }
     } catch (err) {
       const errStr = String(err);
@@ -147,7 +147,7 @@ export default function StatusBar() {
       if (andPush) {
         const { message } = await import('@tauri-apps/plugin-dialog');
         const result = await doPush();
-        if (result) await message(`PR created:\n${result.url}`, { title: 'Push', kind: 'info' });
+        if (result) await message(`${result.updated ? 'PR updated' : 'PR created'}:\n${result.url}`, { title: 'Push', kind: 'info' });
       }
     } catch (err) {
       const { message } = await import('@tauri-apps/plugin-dialog');

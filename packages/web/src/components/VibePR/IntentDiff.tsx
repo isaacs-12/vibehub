@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  FilePlus2, FileEdit, FileX2, Eye, Code2, Loader2, RefreshCw,
+  FilePlus2, FileEdit, FileX2, Eye, Code2, Loader2,
   Plus, Minus, PenLine, ChevronDown, ChevronRight,
 } from 'lucide-react';
 import DiffView from './DiffView';
@@ -58,7 +58,11 @@ function SemanticFileBlock({ file }: { file: FileIntentDiff }) {
   const [expanded, setExpanded] = useState(true);
   const meta = FILE_STATUS_META[file.status];
   const Icon = meta.icon;
-  const highConfidence = file.deltas.filter((d) => d.confidence >= 0.7);
+  // For new/removed files, show all deltas (they're direct extractions).
+  // For modified files, filter by confidence to avoid surfacing rewording noise.
+  const visibleDeltas = file.status === 'modified'
+    ? file.deltas.filter((d) => d.confidence >= 0.7)
+    : file.deltas;
 
   return (
     <div className="border border-border rounded-lg overflow-hidden">
@@ -70,9 +74,9 @@ function SemanticFileBlock({ file }: { file: FileIntentDiff }) {
         <Icon size={13} className={meta.color} />
         <span className="font-mono text-xs text-fg">{file.path}</span>
         <span className={`text-xs ${meta.color}`}>{meta.label}</span>
-        {highConfidence.length > 0 && (
+        {visibleDeltas.length > 0 && (
           <span className="ml-auto text-xs text-fg-muted">
-            {highConfidence.length} intent change{highConfidence.length !== 1 ? 's' : ''}
+            {visibleDeltas.length} intent change{visibleDeltas.length !== 1 ? 's' : ''}
           </span>
         )}
       </button>
@@ -89,7 +93,7 @@ function SemanticFileBlock({ file }: { file: FileIntentDiff }) {
               Feature specification removed.
             </div>
           )}
-          {highConfidence.map((delta, i) => (
+          {visibleDeltas.map((delta, i) => (
             <DeltaRow key={i} delta={delta} />
           ))}
         </div>
@@ -102,12 +106,10 @@ function SemanticView({
   result,
   loading,
   error,
-  onRefresh,
 }: {
   result: IntentDiffResult | null;
   loading: boolean;
   error: string | null;
-  onRefresh: () => void;
 }) {
   if (loading) {
     return (
@@ -121,14 +123,8 @@ function SemanticView({
   if (error) {
     return (
       <div className="border border-border rounded-lg px-4 py-4 text-sm">
-        <p className="text-red-400 mb-2">Failed to compute intent diff: {error}</p>
-        <button
-          onClick={onRefresh}
-          className="flex items-center gap-1.5 text-xs text-accent-emphasis hover:text-accent-emphasis/80 transition-colors"
-        >
-          <RefreshCw size={12} />
-          Retry
-        </button>
+        <p className="text-red-400">Failed to compute intent diff: {error}</p>
+        <p className="text-xs text-fg-muted mt-1">Switch to &ldquo;Content diff&rdquo; to see raw changes.</p>
       </div>
     );
   }
@@ -144,25 +140,17 @@ function SemanticView({
   }
 
   const totalDeltas = result.files.reduce(
-    (sum, f) => sum + f.deltas.filter((d) => d.confidence >= 0.7).length,
+    (sum, f) => sum + (f.status === 'modified'
+      ? f.deltas.filter((d) => d.confidence >= 0.7).length
+      : f.deltas.length),
     0,
   );
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between text-xs text-fg-muted">
-        <span>
-          {result.files.length} file{result.files.length !== 1 ? 's' : ''} with intent changes
-          {totalDeltas > 0 && <> — {totalDeltas} delta{totalDeltas !== 1 ? 's' : ''}</>}
-        </span>
-        <button
-          onClick={onRefresh}
-          className="flex items-center gap-1 text-fg-subtle hover:text-fg-muted transition-colors"
-          title="Recompute intent diff"
-        >
-          <RefreshCw size={11} />
-          Refresh
-        </button>
+      <div className="text-xs text-fg-muted">
+        {result.files.length} file{result.files.length !== 1 ? 's' : ''} with intent changes
+        {totalDeltas > 0 && <> — {totalDeltas} delta{totalDeltas !== 1 ? 's' : ''}</>}
       </div>
       {result.files.map((file) => (
         <SemanticFileBlock key={file.slug} file={file} />
@@ -244,14 +232,14 @@ export default function IntentDiff({ prId, baseFeatures, headFeatures, cachedSem
   const [loading, setLoading] = useState(!cachedSemanticDiff);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchIntentDiff = useCallback(async (force = false) => {
+  const fetchIntentDiff = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const res = await fetch(`/api/prs/${prId}/intent-diff`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ force }),
+        body: '{}',
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
@@ -313,7 +301,6 @@ export default function IntentDiff({ prId, baseFeatures, headFeatures, cachedSem
           result={semanticResult}
           loading={loading}
           error={error}
-          onRefresh={() => fetchIntentDiff(true)}
         />
       ) : (
         <ContentView baseFeatures={baseFeatures} headFeatures={headFeatures} />

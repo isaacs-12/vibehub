@@ -85,6 +85,25 @@ The web app is where specs are reviewed and applied. Non-technical users describ
 - `src/lib/vibe-merge.ts` — 3-way merge for `.vibe/features/*.md` files: `detectConflicts`, `computeMergedVibes`, `changedFiles`
 - `src/app/api/prs/[id]/merge/route.ts` — merge endpoint: detects conflicts, applies resolutions, syncs features table, enqueues compile job
 - `src/app/api/prs/[id]/feather/route.ts` — AI conflict resolution: calls Claude to produce a merged spec when both sides changed the same file
+- `src/lib/intent-diff.ts` — semantic intent diffing: LLM extracts behavioral intent from specs, distinguishing real changes from rewording
+- `src/app/api/prs/[id]/intent-diff/route.ts` — intent diff endpoint: computes or returns cached semantic diff
+- `src/components/VibePR/DiffView.tsx` — line-level content diff renderer (unified + side-by-side)
+
+**Intent diffing:**
+
+The PR review page has two views, toggled with a pill switch:
+
+- **Intent changes** (default) — an LLM extracts discrete behavioral intents from each spec file and surfaces only what actually changed in meaning. Rewording, formatting, and clarifications that don't alter behavior are filtered out. For new files, every intent is enumerated. For modified files, only genuine behavioral deltas are shown.
+- **Content diff** — raw line-level text diff with add/remove highlighting, for when you want to see exactly what changed in the markdown.
+
+Intent diffing uses a single batched LLM call (Gemini Flash by default) for all changed files. The prompt asks for a keyed JSON object mapping filenames to arrays of `{ kind, summary, confidence }` deltas. Results are cached on the PR record and never recomputed (non-deterministic outputs mean different users should see the same diff). If the LLM call fails, the UI shows "Intent analysis unavailable" and points to the content diff as a fallback.
+
+The flow:
+1. PR is created (push from desktop or web)
+2. Server fires async intent diff computation — single Gemini call with all changed specs
+3. If successful, result is cached in `intentDiff.semanticDiff` on the PR record
+4. If failed, nothing is cached — next page load retries via the endpoint
+5. Reviewer opens PR → sees cached intent view or loading spinner → can toggle to content diff
 
 **The 3-way merge:**
 
@@ -222,6 +241,12 @@ cd vibehub
 make setup   # copies .env.example → .env, npm install, starts Docker stack, runs DB migrations
 ```
 
+Next.js loads `.env` from its own package directory, not the monorepo root. Symlink it so the web dev server picks up the root env vars:
+
+```bash
+ln -sf ../../.env packages/web/.env   # gitignored — safe to create
+```
+
 Edit `.env`:
 
 ```bash
@@ -311,6 +336,8 @@ GitHub's PRs are code-level. You review diffs of files. VibeHub's PRs are spec-l
 ## What's interesting to work on
 
 - **Agentic loop reliability** (`packages/agent/src/agent.ts`) — the two-phase loop with upstream context flow handles most cases well, but edge cases remain: package manager differences, missing system tools, flaky tests, and projects that need non-standard build steps.
+
+- **Intent diff reliability** (`packages/web/src/lib/intent-diff.ts`) — the semantic diff depends on an LLM extracting structured intents from specs. Currently uses a single batched Gemini Flash call. Model-agnostic by design, but output quality varies across providers. Making this robust regardless of model (retry strategies, fallback prompts, validation) is key to the review UX.
 
 - **Spec merge quality** (`packages/web/src/lib/vibe-merge.ts`) — the current merge is file-level. A section-level or paragraph-level merge would reduce false conflicts and produce better AI-feathered results.
 

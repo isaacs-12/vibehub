@@ -170,17 +170,42 @@ export default function ConceptsPage() {
       <Section title="Updates (Pull Requests)">
         <p>
           Updates are VibeHub&apos;s equivalent of pull requests, but at the spec
-          level. When someone proposes a change, the diff shows intent changes in
-          plain English &mdash; not code changes.
+          level. When someone proposes a change, the review page shows two
+          views of what changed:
+        </p>
+        <DefinitionList
+          items={[
+            {
+              term: 'Intent changes',
+              definition:
+                'The default view. An LLM analyzes the spec files and extracts what behavioral intent actually changed — new capabilities, removed constraints, modified rules. Rewording, formatting, and clarifications that don\'t alter meaning are filtered out. Each change is shown as a one-sentence summary.',
+            },
+            {
+              term: 'Content diff',
+              definition:
+                'A traditional line-level diff of the raw markdown, with added/removed highlighting. Available as a toggle for when you want to see exactly what text changed.',
+            },
+          ]}
+        />
+        <p>
+          Intent diffing reduces cognitive load: instead of reading through
+          full spec files to figure out what&apos;s different, reviewers see a
+          clear list of what the change actually <em>means</em>. For new files,
+          every discrete intent is extracted. For modified files, only genuine
+          behavioral changes are surfaced.
         </p>
         <p>
-          Each update includes implementation proofs: the AI-generated code that
-          would result from the spec change. Reviewers can evaluate whether the
-          intent is right without reading implementation details.
+          Each update also includes implementation proofs: the AI-generated code
+          that would result from the spec change. Reviewers can evaluate whether
+          the intent is right without reading implementation details.
         </p>
         <p>
           If specs have been modified on both sides, VibeHub detects conflicts
-          and offers AI-assisted resolution at the spec level.
+          and offers three resolution options: accept the main version, accept
+          the incoming version, or use AI to intelligently merge both versions
+          (called &ldquo;feathering&rdquo;). The conflict resolver shows a
+          side-by-side diff of each version against the common ancestor, with
+          per-line change highlighting.
         </p>
       </Section>
 

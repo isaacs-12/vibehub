@@ -74,23 +74,25 @@ function SemanticFileBlock({ file }: { file: FileIntentDiff }) {
         <Icon size={13} className={meta.color} />
         <span className="font-mono text-xs text-fg">{file.path}</span>
         <span className={`text-xs ${meta.color}`}>{meta.label}</span>
-        {visibleDeltas.length > 0 && (
+        {file.failed ? (
+          <span className="ml-auto text-xs text-fg-subtle italic">analysis failed</span>
+        ) : visibleDeltas.length > 0 ? (
           <span className="ml-auto text-xs text-fg-muted">
             {visibleDeltas.length} intent change{visibleDeltas.length !== 1 ? 's' : ''}
           </span>
-        )}
+        ) : null}
       </button>
 
       {expanded && (
         <div className="px-3 py-2 space-y-1.5">
-          {file.status === 'added' && file.deltas.length === 0 && (
-            <div className="text-sm text-fg-muted px-3 py-2">
-              New feature specification added.
+          {file.failed && (
+            <div className="text-sm text-fg-subtle italic px-3 py-2">
+              Intent analysis unavailable — switch to &ldquo;Content diff&rdquo; to see raw changes.
             </div>
           )}
-          {file.status === 'removed' && file.deltas.length === 0 && (
+          {!file.failed && visibleDeltas.length === 0 && file.status === 'modified' && (
             <div className="text-sm text-fg-muted px-3 py-2">
-              Feature specification removed.
+              No meaningful intent changes — only rewording or formatting.
             </div>
           )}
           {visibleDeltas.map((delta, i) => (

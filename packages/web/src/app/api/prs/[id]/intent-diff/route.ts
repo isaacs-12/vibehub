@@ -25,9 +25,10 @@ export async function POST(req: Request, { params }: Params) {
     return NextResponse.json({ error: 'No head features to diff' }, { status: 400 });
   }
 
-  // Return cached if available
-  if (pr.intentDiff?.semanticDiff) {
-    return NextResponse.json(pr.intentDiff.semanticDiff);
+  // Return cached if available and not a failed result
+  const cached = pr.intentDiff?.semanticDiff;
+  if (cached && !cached.files.some((f: any) => f.failed)) {
+    return NextResponse.json(cached);
   }
 
   // Not yet computed — compute once and cache.

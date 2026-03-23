@@ -82,6 +82,9 @@ export async function POST(request: Request, { params }: Params) {
   if (features.length > 0) {
     computeIntentDiff(baseFeatures, features)
       .then(async (semanticDiff) => {
+        // Only cache successful results — don't persist failures
+        const hasFailed = semanticDiff.files.some((f) => f.failed);
+        if (hasFailed) return;
         const freshPr = await store.getPR(pr.id);
         if (freshPr) {
           await store.upsertPR({

@@ -85,6 +85,8 @@ export interface VibePR {
     headFeatures?: { path: string; content: string }[];
     /** Generated code from Vibe compile, pushed alongside the vibes. */
     implementationProofs?: { path: string; content: string }[];
+    /** LLM-computed semantic intent deltas (cached). */
+    semanticDiff?: import('@/lib/intent-diff').IntentDiffResult | null;
   } | null;
 }
 

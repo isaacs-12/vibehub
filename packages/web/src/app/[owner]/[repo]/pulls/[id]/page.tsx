@@ -90,10 +90,12 @@ export default async function VibePRPage({ params }: Props) {
         </div>
       </div>
 
-      {/* Intent Diff — shows what changed between base and head */}
+      {/* Intent Diff — semantic view by default, content diff toggle */}
       <IntentDiff
+        prId={pr.id}
         baseFeatures={pr.intentDiff?.baseFeatures ?? []}
         headFeatures={pr.intentDiff?.headFeatures ?? []}
+        cachedSemanticDiff={pr.intentDiff?.semanticDiff ?? null}
       />
 
       {/* Implementation Proofs */}

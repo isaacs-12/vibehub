@@ -5,6 +5,7 @@ import type { CompileJob } from '@/lib/data/store';
 import { COMPILE_LIMITS } from '@/lib/data/store';
 import { requireAuth, isAuthError, requireOwnership, requireReadAccess } from '@/lib/auth-middleware';
 import { resolveCompileModel } from '@/lib/resolve-compile-model';
+import { computeIntentDiff } from '@/lib/intent-diff';
 
 interface Params { params: { owner: string; repo: string } }
 
@@ -68,6 +69,22 @@ export async function POST(request: Request, { params }: Params) {
 
   const store = getStore();
   await store.upsertPR(pr);
+
+  // Fire semantic intent diff computation asynchronously (don't block PR creation)
+  if (features.length > 0) {
+    computeIntentDiff(baseFeatures, features)
+      .then(async (semanticDiff) => {
+        const freshPr = await store.getPR(pr.id);
+        if (freshPr) {
+          await store.upsertPR({
+            ...freshPr,
+            updatedAt: new Date().toISOString(),
+            intentDiff: { ...freshPr.intentDiff, semanticDiff },
+          });
+        }
+      })
+      .catch(() => { /* intent diff is best-effort; UI can trigger on-demand */ });
+  }
 
   // If the PR includes new features and no base was provided, snapshot current state as base
   if (features.length > 0 && baseFeatures.length === 0) {

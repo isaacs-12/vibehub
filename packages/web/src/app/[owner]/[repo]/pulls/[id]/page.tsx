@@ -90,8 +90,11 @@ export default async function VibePRPage({ params }: Props) {
         </div>
       </div>
 
-      {/* Intent Diff — head branch vibe files from push */}
-      <IntentDiff headFeatures={pr.intentDiff?.headFeatures ?? []} />
+      {/* Intent Diff — shows what changed between base and head */}
+      <IntentDiff
+        baseFeatures={pr.intentDiff?.baseFeatures ?? []}
+        headFeatures={pr.intentDiff?.headFeatures ?? []}
+      />
 
       {/* Implementation Proofs */}
       <div className="mt-8">

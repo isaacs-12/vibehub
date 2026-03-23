@@ -3,6 +3,8 @@
 import React, { useState } from 'react';
 import { GitMerge, Loader2, CheckCircle2, Sparkles, ChevronDown, ChevronRight } from 'lucide-react';
 import type { MergeConflict } from '@/lib/vibe-merge';
+import { SideBySideDiff } from './DiffView';
+import DiffView from './DiffView';
 
 type Resolution =
   | { type: 'head' }
@@ -136,37 +138,18 @@ export default function ConflictResolver({ prId, conflicts, onMerged, onCancel }
 
                 {isExpanded && (
                   <>
-                    {/* Side-by-side versions */}
-                    <div className="grid grid-cols-2 gap-3 mb-3">
-                      <div className={`rounded-lg border overflow-hidden ${r?.type === 'main' ? 'border-accent' : 'border-border'}`}>
-                        <div className="px-3 py-1.5 bg-canvas-subtle border-b border-border text-xs font-medium text-fg-muted flex items-center justify-between">
-                          <span>Main (theirs)</span>
-                          <button
-                            onClick={() => setResolution(conflict.name, { type: 'main' })}
-                            className="text-xs px-2 py-0.5 rounded border border-border hover:border-accent hover:text-accent-emphasis transition-colors"
-                          >
-                            Use this
-                          </button>
-                        </div>
-                        <pre className="px-3 py-2 text-xs font-mono text-fg-muted overflow-x-auto overflow-y-auto max-h-48 whitespace-pre-wrap bg-canvas-inset leading-relaxed">
-                          {conflict.mainContent || '(empty)'}
-                        </pre>
-                      </div>
-
-                      <div className={`rounded-lg border overflow-hidden ${r?.type === 'head' ? 'border-accent' : 'border-border'}`}>
-                        <div className="px-3 py-1.5 bg-canvas-subtle border-b border-border text-xs font-medium text-fg-muted flex items-center justify-between">
-                          <span>Yours (incoming)</span>
-                          <button
-                            onClick={() => setResolution(conflict.name, { type: 'head' })}
-                            className="text-xs px-2 py-0.5 rounded border border-border hover:border-accent hover:text-accent-emphasis transition-colors"
-                          >
-                            Use this
-                          </button>
-                        </div>
-                        <pre className="px-3 py-2 text-xs font-mono text-fg-muted overflow-x-auto overflow-y-auto max-h-48 whitespace-pre-wrap bg-canvas-inset leading-relaxed">
-                          {conflict.headContent || '(empty)'}
-                        </pre>
-                      </div>
+                    {/* Side-by-side diffs against base */}
+                    <div className="mb-3">
+                      <SideBySideDiff
+                        baseText={conflict.baseContent}
+                        leftText={conflict.mainContent}
+                        rightText={conflict.headContent}
+                        leftLabel="Main (theirs)"
+                        rightLabel="Yours (incoming)"
+                        selectedSide={r?.type === 'main' ? 'left' : r?.type === 'head' ? 'right' : null}
+                        onSelectLeft={() => setResolution(conflict.name, { type: 'main' })}
+                        onSelectRight={() => setResolution(conflict.name, { type: 'head' })}
+                      />
                     </div>
 
                     {/* Feather with AI */}
@@ -186,12 +169,16 @@ export default function ConflictResolver({ prId, conflicts, onMerged, onCancel }
                         </button>
                       </div>
                       {r?.type === 'feathered' ? (
-                        <pre className="px-3 py-2 text-xs font-mono text-fg-muted overflow-x-auto overflow-y-auto max-h-48 whitespace-pre-wrap bg-canvas-inset leading-relaxed">
-                          {r.content}
-                        </pre>
+                        <DiffView
+                          oldText={conflict.baseContent}
+                          newText={r.content}
+                          oldLabel="base"
+                          newLabel="feathered"
+                          maxHeight="12rem"
+                        />
                       ) : (
                         <div className="px-3 py-3 text-xs text-fg-subtle italic text-center">
-                          Click "Feather with AI" to intelligently merge both versions
+                          Click &ldquo;Feather with AI&rdquo; to intelligently merge both versions
                         </div>
                       )}
                     </div>

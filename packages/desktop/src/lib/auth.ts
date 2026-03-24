@@ -11,7 +11,9 @@
 
 import { useVibeStore, type AuthUser } from '../store';
 
-const WEB_URL = import.meta.env.VITE_VIBEHUB_WEB_URL || 'http://localhost:3000';
+const WEB_URL = import.meta.env.DEV
+  ? 'http://localhost:3000'
+  : (import.meta.env.VITE_VIBEHUB_WEB_URL || 'https://getvibehub.com');
 
 /** The login URL for the desktop auth flow. */
 export function getLoginUrl() {

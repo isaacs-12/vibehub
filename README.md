@@ -343,13 +343,13 @@ GitHub's PRs are code-level. You review diffs of files. VibeHub's PRs are spec-l
 
 - **Import from existing codebases** (`vibe import`) — extracting good specs from existing code is the hardest part of the onboarding story. The quality of extracted specs determines everything downstream.
 
-- **Tier 2/3 scaling** — the current architecture (polling workers, per-user limits, zombie reaping) handles moderate load. For production scale: dedicated job queues (Redis/SQS), workspace pooling, cost tracking per user, and priority queuing for BYOK users.
+- **Tier 2/3 scaling** — the current architecture (polling workers, per-user limits, zombie reaping) handles moderate load. For production scale: we should really migrate to a dedicated job queues (Redis/SQS), workspace pooling, per-user cost-tracking, and a priority queuing for BYOK/premium users.
 
 - **Desktop compile visibility** — the desktop app uses a separate local Gemini compile pipeline. Bringing cloud compile progress (or vice versa) into the desktop would unify the experience.
 
-- **Deploy integrations** — the natural step after code generation is deployment. Vercel, Railway, and Render all have APIs. The `project.json` manifest already has `build` and `dev`; a `deploy` field is the obvious extension.
+- **Deploy integrations** — the natural step after code generation is deployment. Vercel, Railway, and Render all have APIs. The `project.json` manifest already has `build` and `dev`; a `deploy` field is the obvious extension. This should honestly be pretty straightforward, but I don't have the cash to throw at testing it myself.
 
-- **Web container preview** — running the generated app in-browser using StackBlitz WebContainers would close the loop for non-technical users: describe → AI builds → preview in-tab, no deployment step.
+- **Web container preview** — running the generated app in-browser using StackBlitz WebContainers would close the loop for non-technical users: describe → AI builds → preview in-tab, no deployment step. Again, limited by my own cash.
 
 ---
 

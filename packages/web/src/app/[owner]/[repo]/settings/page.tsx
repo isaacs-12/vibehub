@@ -2,7 +2,6 @@ import React from 'react';
 import ProjectDetails from '@/components/Settings/ProjectDetails';
 import VisibilitySettings from '@/components/Settings/VisibilitySettings';
 import ProviderConfig from '@/components/Settings/ProviderConfig';
-import ImportJobs from '@/components/Settings/ImportJobs';
 import { getStore } from '@/lib/data/store';
 import { notFound, redirect } from 'next/navigation';
 import { auth } from '@/lib/auth';
@@ -32,7 +31,6 @@ export default async function SettingsPage({ params }: Props) {
         <ProjectDetails owner={owner} repo={repo} description={project.description} />
         <VisibilitySettings owner={owner} repo={repo} currentVisibility={project.visibility} currentListed={project.listed ?? false} />
         <ProviderConfig />
-        <ImportJobs owner={owner} repo={repo} />
       </div>
     </div>
   );

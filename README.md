@@ -355,4 +355,4 @@ GitHub's PRs are code-level. You review diffs of files. VibeHub's PRs are spec-l
 
 ## License
 
-MIT
+[BSL 1.1](LICENSE) — source-available, free for non-commercial use. Converts to Apache 2.0 after 4 years per version.

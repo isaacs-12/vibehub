@@ -1,6 +1,6 @@
 {
   "name": "@vibehub/agent",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Cloud compile agent — runs separately from the web backend for independent scaling.",
   "type": "module",

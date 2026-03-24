@@ -14,7 +14,7 @@ use commands::{
 };
 use std::sync::Arc;
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
 use tokio::sync::Mutex;
 
 /// Returns the current app version from Cargo.toml at compile time.

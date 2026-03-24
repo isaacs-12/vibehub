@@ -73,31 +73,40 @@ export default function DownloadPage() {
           <Monitor size={14} /> Desktop App
         </h2>
 
-        {primaryDownload ? (
-          <div className="border border-border rounded-xl bg-canvas-subtle p-6">
-            <div className="flex items-center justify-between flex-wrap gap-4">
-              <div>
-                <h3 className="text-lg font-semibold text-fg flex items-center gap-2">
-                  <Apple size={18} /> VibeStudio for macOS
-                </h3>
-                <p className="text-sm text-fg-muted mt-1">
+        <div className="border border-border rounded-xl bg-canvas-subtle p-6">
+          <div className="flex items-center gap-2 mb-3">
+            <Apple size={18} className="text-fg" />
+            <h3 className="text-lg font-semibold text-fg">VibeStudio for macOS</h3>
+          </div>
+          <p className="text-sm text-fg-muted mb-3">Install with a single command:</p>
+          <pre className="bg-canvas-inset border border-border rounded-lg p-4 text-sm text-fg overflow-x-auto">
+            <code>curl -fsSL https://getvibehub.com/install-studio.sh | sh</code>
+          </pre>
+
+          {primaryDownload && (
+            <details className="mt-4">
+              <summary className="text-xs text-fg-muted cursor-pointer hover:text-fg">
+                Or download the DMG manually
+              </summary>
+              <div className="mt-3 flex items-center justify-between flex-wrap gap-4">
+                <p className="text-sm text-fg-muted">
                   {primaryDownload.name} &middot; {formatSize(primaryDownload.size)}
                 </p>
+                <a
+                  href={primaryDownload.browser_download_url}
+                  className="inline-flex items-center gap-2 px-4 py-2 border border-border text-sm font-medium rounded-lg hover:bg-canvas-inset transition-colors text-fg"
+                >
+                  <Download size={15} />
+                  Download DMG
+                </a>
               </div>
-              <a
-                href={primaryDownload.browser_download_url}
-                className="inline-flex items-center gap-2 px-6 py-2.5 bg-accent text-white text-sm font-medium rounded-lg hover:bg-accent/80 transition-colors"
-              >
-                <Download size={15} />
-                {platform === 'mac-arm' || platform === 'mac-intel' ? 'Download' : 'Download for macOS'}
-              </a>
-            </div>
-          </div>
-        ) : (
-          <div className="border border-border rounded-xl bg-canvas-subtle p-6 text-center text-sm text-fg-muted">
-            Loading latest release&hellip;
-          </div>
-        )}
+              <p className="mt-2 text-xs text-fg-subtle">
+                Note: macOS may show a security warning for DMG downloads. If so, run:{' '}
+                <code className="bg-canvas-inset px-1.5 py-0.5 rounded text-[11px]">xattr -cr /Applications/VibeStudio.app</code>
+              </p>
+            </details>
+          )}
+        </div>
 
         <p className="text-xs text-fg-subtle mt-3">
           Windows and Linux desktop builds coming soon.

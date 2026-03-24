@@ -2,9 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { Play, Square, Settings, Package, Loader2, X, Save, Trash2, PenTool } from 'lucide-react';
 import { useVibeStore } from '../../store/index.ts';
 import type { ToolEntry, ToolConfig } from '../../store/index.ts';
+import { useVibeProject } from '../../hooks/useVibeProject.ts';
 
 export default function ToolsView() {
   const { tools, setTools, toolConfigs, setToolConfig, setAppMode } = useVibeStore();
+  const { openProject } = useVibeProject();
   const [runningTools, setRunningTools] = useState<Record<string, boolean>>({});
   const [configuring, setConfiguring] = useState<ToolEntry | null>(null);
   const [configValues, setConfigValues] = useState<Record<string, string>>({});
@@ -100,16 +102,9 @@ export default function ToolsView() {
     }
   }
 
-  function handleEditTool(tool: ToolEntry) {
-    // Open this project in editor mode
-    const store = useVibeStore.getState();
-    store.resetProjectState(tool.root);
-    localStorage.setItem('lastProjectRoot', tool.root);
+  async function handleEditTool(tool: ToolEntry) {
+    await openProject(tool.root);
     setAppMode('editor');
-    // Trigger project load
-    import('../../hooks/useVibeProject.ts').then((_mod) => {
-      // The openProject is called via resetProjectState + useEffect in App
-    });
   }
 
   if (tools.length === 0) {

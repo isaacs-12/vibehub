@@ -3,6 +3,8 @@ import Link from 'next/link';
 import { Zap, GitFork, Star, Cpu } from 'lucide-react';
 import { getStore } from '@/lib/data/store';
 
+export const dynamic = 'force-dynamic';
+
 export default async function ExplorePage() {
   const projects = await getStore().listProjects();
 

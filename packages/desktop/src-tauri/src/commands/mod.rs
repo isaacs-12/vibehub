@@ -287,33 +287,6 @@ pub async fn get_mapped_code(
     Ok(files)
 }
 
-/// Find first entry-point under src/ (e.g. src/index.ts or src/overview.ts). Prefer index.*.
-fn find_src_entry(root: &std::path::Path) -> Option<String> {
-    let src = root.join("src");
-    if !src.is_dir() {
-        return None;
-    }
-    let mut index_first: Vec<String> = Vec::new();
-    let mut rest: Vec<String> = Vec::new();
-    for e in WalkDir::new(&src).max_depth(3).into_iter().filter_map(|x| x.ok()) {
-        if !e.file_type().is_file() {
-            continue;
-        }
-        let ext = e.path().extension().and_then(|x| x.to_str()).unwrap_or("");
-        if !["ts", "tsx", "js", "mjs"].contains(&ext) {
-            continue;
-        }
-        let rel = e.path().strip_prefix(root).ok()?;
-        let s = rel.to_string_lossy().replace('\\', "/");
-        if rel.file_stem().and_then(|x| x.to_str()) == Some("index") {
-            index_first.push(s);
-        } else {
-            rest.push(s);
-        }
-    }
-    index_first.into_iter().next().or_else(|| rest.into_iter().next())
-}
-
 /// Kill process by pid (Unix: kill -9; Windows: taskkill /F /PID).
 fn kill_pid(pid: u32) {
     #[cfg(unix)]

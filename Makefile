@@ -366,6 +366,9 @@ lint: venv
 
 build-desktop:
 	@echo "  Building VibeStudio…"
+	@# Detach any stale VibeStudio DMG mounts from previous builds
+	@hdiutil info 2>/dev/null | grep -B1 'VibeStudio' | grep '/dev/disk' | awk '{print $$1}' | sed 's/s[0-9]*$$//' | sort -u | while read dev; do hdiutil detach "$$dev" -force 2>/dev/null; done || true
+	@rm -f packages/desktop/src-tauri/target/release/bundle/macos/rw.*.dmg 2>/dev/null || true
 	$(NPM) run tauri build --workspace=packages/desktop
 	@echo "  $(GREEN)✔ Desktop build complete$(RESET)"
 	@echo "  Artifacts: packages/desktop/src-tauri/target/release/bundle/"

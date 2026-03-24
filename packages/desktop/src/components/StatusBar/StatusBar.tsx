@@ -16,6 +16,8 @@ export default function StatusBar() {
   const [mergeLoading, setMergeLoading] = useState(false);
   const [remoteModal, setRemoteModal] = useState<{ owner: string; repo: string; webUrl: string } | null>(null);
   const [signInOpen, setSignInOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const isOnMain = currentBranch === 'main' || currentBranch === 'master';
@@ -27,6 +29,18 @@ export default function StatusBar() {
       setTimeout(() => inputRef.current?.focus(), 0);
     }
   }, [newBranchOpen]);
+
+  // Close user menu on outside click
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    function onDown(e: MouseEvent) {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [userMenuOpen]);
 
   // ── Remote config ───────────────────────────────────────────────────────────
 
@@ -252,24 +266,36 @@ export default function StatusBar() {
       {/* Right: remote config + auth + project root */}
       <div className="flex items-center gap-2 text-white/70">
         {projectRoot && <span className="font-mono truncate max-w-xs">{projectRoot}</span>}
-        {projectRoot && (
-          <button
-            onClick={handleOpenRemoteConfig}
-            title="Configure remote (owner/repo)"
-            className="flex items-center hover:bg-white/10 px-1 py-0.5 rounded transition-colors"
-          >
-            <Settings size={11} />
-          </button>
-        )}
         {authUser ? (
-          <button
-            onClick={() => clearAuth()}
-            title={`Signed in as ${authUser.name ?? authUser.email} — click to sign out`}
-            className="flex items-center gap-1 hover:bg-white/10 px-1.5 py-0.5 rounded transition-colors"
-          >
-            <User size={11} />
-            <span className="text-[10px] max-w-[100px] truncate">{authUser.name ?? authUser.email}</span>
-          </button>
+          <div className="relative" ref={userMenuRef}>
+            <button
+              onClick={() => setUserMenuOpen((v) => !v)}
+              title={`Signed in as ${authUser.name ?? authUser.email}`}
+              className="flex items-center gap-1 hover:bg-white/10 px-1.5 py-0.5 rounded transition-colors"
+            >
+              <User size={11} />
+              <span className="text-[10px] max-w-[100px] truncate">{authUser.name ?? authUser.email}</span>
+            </button>
+            {userMenuOpen && (
+              <div className="absolute bottom-7 right-0 bg-surface-overlay border border-surface-border rounded shadow-xl w-48 py-1 z-50">
+                <div className="px-3 py-1.5 text-[10px] text-gray-400 truncate border-b border-surface-border mb-1">
+                  {authUser.email}
+                </div>
+                <button
+                  onClick={() => { handleOpenRemoteConfig(); setUserMenuOpen(false); }}
+                  className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-surface-raised transition-colors flex items-center gap-2"
+                >
+                  <Settings size={11} /> Configure remote
+                </button>
+                <button
+                  onClick={() => { clearAuth(); setUserMenuOpen(false); }}
+                  className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-surface-raised transition-colors flex items-center gap-2"
+                >
+                  <ExternalLink size={11} /> Sign out
+                </button>
+              </div>
+            )}
+          </div>
         ) : (
           <button
             onClick={() => setSignInOpen(true)}

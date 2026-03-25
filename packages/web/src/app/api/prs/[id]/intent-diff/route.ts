@@ -37,14 +37,18 @@ export async function POST(req: Request, { params }: Params) {
   try {
     const result = await computeIntentDiff(base, head);
 
-    await store.upsertPR({
-      ...pr,
-      updatedAt: new Date().toISOString(),
-      intentDiff: {
-        ...pr.intentDiff,
-        semanticDiff: result,
-      },
-    });
+    // Only cache successful results — don't persist failures so they get retried
+    const hasFailed = result.files.some((f) => f.failed);
+    if (!hasFailed) {
+      await store.upsertPR({
+        ...pr,
+        updatedAt: new Date().toISOString(),
+        intentDiff: {
+          ...pr.intentDiff,
+          semanticDiff: result,
+        },
+      });
+    }
 
     return NextResponse.json(result);
   } catch (e) {

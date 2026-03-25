@@ -143,13 +143,15 @@ async function callGemini(prompt: string): Promise<Record<string, IntentDelta[]>
   }
 
   // Validate and filter each file's deltas
+  // Normalize keys: the LLM may return "overview.md" but we use "overview" as the slug
   const result: Record<string, IntentDelta[]> = {};
   for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
     if (!Array.isArray(value)) {
       console.warn(`[intent-diff] Non-array value for ${key}, skipping`);
       continue;
     }
-    result[key] = value.filter(
+    const normalizedKey = key.replace(/\.md$/, '');
+    result[normalizedKey] = value.filter(
       (d: any) =>
         d &&
         typeof d.kind === 'string' &&

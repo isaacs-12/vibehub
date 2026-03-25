@@ -230,8 +230,12 @@ function ContentView({ baseFeatures, headFeatures }: { baseFeatures: VibeFile[];
 
 export default function IntentDiff({ prId, baseFeatures, headFeatures, cachedSemanticDiff }: IntentDiffProps) {
   const [mode, setMode] = useState<ViewMode>('intent');
-  const [semanticResult, setSemanticResult] = useState<IntentDiffResult | null>(cachedSemanticDiff ?? null);
-  const [loading, setLoading] = useState(!cachedSemanticDiff);
+  // Treat a cached result where every file failed as if there's no cache — trigger a refetch
+  const usableCache = cachedSemanticDiff && !cachedSemanticDiff.files.every((f) => f.failed)
+    ? cachedSemanticDiff
+    : null;
+  const [semanticResult, setSemanticResult] = useState<IntentDiffResult | null>(usableCache);
+  const [loading, setLoading] = useState(!usableCache);
   const [error, setError] = useState<string | null>(null);
 
   const fetchIntentDiff = useCallback(async () => {
@@ -254,10 +258,10 @@ export default function IntentDiff({ prId, baseFeatures, headFeatures, cachedSem
   }, [prId]);
 
   useEffect(() => {
-    if (!cachedSemanticDiff && headFeatures.length > 0) {
+    if (!usableCache && headFeatures.length > 0) {
       fetchIntentDiff();
     }
-  }, [cachedSemanticDiff, headFeatures.length, fetchIntentDiff]);
+  }, [usableCache, headFeatures.length, fetchIntentDiff]);
 
   if (headFeatures.length === 0 && baseFeatures.length === 0) {
     return (

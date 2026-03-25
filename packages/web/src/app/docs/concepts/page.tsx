@@ -222,19 +222,45 @@ export default function ConceptsPage() {
         </p>
       </Section>
 
-      <Section title="Model Selection">
+      <Section title="Model Selection & API Keys">
         <p>
           VibeHub is model-agnostic. You choose which AI model compiles your
-          specs. Currently supported:
+          specs. Currently supported providers:
         </p>
         <ul className="list-disc list-inside space-y-1 text-sm text-fg-muted">
-          <li>Gemini (default for CLI)</li>
+          <li>Gemini (default for CLI and free-tier cloud compiles)</li>
           <li>Claude (available for cloud compiles)</li>
+          <li>OpenAI (available for cloud compiles)</li>
         </ul>
+        <p>
+          <strong className="text-fg">Free tier:</strong> If you don&apos;t
+          configure your own keys, VibeHub uses platform Gemini keys with
+          reduced concurrency (1 active compile at a time).
+        </p>
+        <p>
+          <strong className="text-fg">Bring your own key (BYOK):</strong>{' '}
+          Add your own API key for any supported provider in your account
+          settings on the web. Keys are encrypted at rest (AES-256-CBC) and
+          never exposed to clients. BYOK users get higher concurrency limits
+          (up to 3 active compiles) and access to all supported models.
+        </p>
         <p>
           Model selection is per-project and can be changed in project settings.
           Different models may produce different implementations from the same
           spec &mdash; that&apos;s expected and useful for comparison.
+        </p>
+      </Section>
+
+      <Section title="Managing Updates from the CLI">
+        <p>
+          Updates can also be managed from the command line using{' '}
+          <Code>vibe updates</Code>. You can list, close, reopen, retry
+          compilation, and revert updates without leaving the terminal. See
+          the{' '}
+          <a href="/docs/cli" className="text-accent-emphasis hover:underline">
+            CLI Reference
+          </a>{' '}
+          for details.
         </p>
       </Section>
     </div>

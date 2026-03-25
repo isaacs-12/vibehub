@@ -63,34 +63,56 @@ export default function VibeStudioPage() {
         </p>
       </Section>
 
-      <Section title="Authentication">
+      <Section title="Authentication & API Keys">
         <p>
-          VibeStudio uses a secure OAuth flow to connect to your VibeHub
-          account:
+          VibeStudio has no secrets or API keys built in &mdash; it&apos;s a
+          thin client that authenticates against the VibeHub web backend. The
+          only config compiled into the app is the web URL
+          (<Code>https://getvibehub.com</Code>).
+        </p>
+        <p>
+          <strong className="text-fg">Sign-in flow:</strong>
         </p>
         <ol className="list-decimal list-inside space-y-2 text-sm text-fg-muted">
           <li>
             Click <strong className="text-fg">Sign in</strong> in VibeStudio
-            &mdash; this opens your system browser.
+            &mdash; this opens your system browser to the VibeHub web app.
           </li>
           <li>
-            Authenticate with Google OAuth on getvibehub.com (VibeStudio uses
-            its own OAuth client, separate from the web app).
+            Authenticate with Google OAuth on getvibehub.com.
           </li>
           <li>
-            After login, the browser redirects to a{' '}
-            <Code>vibehub://auth?token=...</Code> deep link, which hands a
-            secure bearer token back to VibeStudio.
+            After login, the web backend issues a long-lived bearer token
+            (valid for 365 days) and redirects to a{' '}
+            <Code>vibehub://auth?token=...</Code> deep link, which hands the
+            token back to VibeStudio.
           </li>
           <li>
-            VibeStudio validates the token with the server and stores it
-            locally. On future launches, the token is re-validated automatically.
+            VibeStudio stores the token locally. On future launches, it&apos;s
+            used automatically &mdash; no need to sign in again until it
+            expires.
           </li>
         </ol>
         <p>
-          The bearer token is used for all API requests (push, pull, compile).
-          The server enforces ownership on every write &mdash; you can only push
-          to projects you own. Tokens expire and can be revoked by signing out.
+          <strong className="text-fg">Provider API keys:</strong>
+        </p>
+        <p>
+          When the cloud agent compiles your specs, it needs API keys for the
+          AI provider (Anthropic, Google, OpenAI). These keys are configured in
+          your account settings on the web app &mdash; not in VibeStudio
+          itself. Keys are encrypted at rest (AES-256-CBC) and never sent to
+          the desktop app. VibeStudio calls the web backend, which decrypts
+          and uses your keys server-side.
+        </p>
+        <p>
+          If you haven&apos;t configured your own keys, the platform&apos;s
+          default Gemini keys are used with reduced concurrency limits (1
+          active compile vs. 3 for BYOK users).
+        </p>
+        <p>
+          <strong className="text-fg">In short:</strong> sign in once via the
+          desktop app, configure your API keys on the web, and VibeStudio uses
+          them transparently through the backend.
         </p>
       </Section>
 

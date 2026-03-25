@@ -72,7 +72,6 @@ my-app (v0.1.0)
         flags={[
           { flag: '-d, --dir', default: '.', description: 'Project directory' },
           { flag: '-k, --api-key', default: '$GEMINI_API_KEY', description: 'Gemini API key' },
-          { flag: '--check', default: 'false', description: 'Validate only, skip code generation' },
           { flag: '--json', default: 'false', description: 'Output as JSON (CompilationReport)' },
         ]}
         example={`$ vibe compile
@@ -102,9 +101,59 @@ Status: success`}
         ]}
       />
 
+      <CommandSection
+        name="vibe check"
+        usage="vibe check"
+        description="Validate specs without generating code. Runs typechecking and tests against the existing codebase. Safe for CI pipelines."
+        flags={[
+          { flag: '-d, --dir', default: '.', description: 'Project directory' },
+          { flag: '-k, --api-key', default: '$GEMINI_API_KEY', description: 'Gemini API key' },
+        ]}
+        example={`$ vibe check
+Checking 4 features...
+  ✓ Typecheck passed
+  ✓ 12 tests passed
+
+Status: success`}
+        notes={[
+          'Does not generate or modify any code',
+          'Useful in CI to verify specs are still valid after changes',
+        ]}
+      />
+
+      <CommandSection
+        name="vibe updates"
+        usage="vibe updates [subcommand] [flags]"
+        description="Manage updates (pull requests) for your project from the command line. Requires authentication and a .vibe/remote.json to know which project to target."
+        flags={[
+          { flag: 'list', default: '(default)', description: 'List updates. Supports --status open|merged|closed' },
+          { flag: 'close <id>', default: '', description: 'Close an open update without merging' },
+          { flag: 'reopen <id>', default: '', description: 'Reopen a previously closed update' },
+          { flag: 'retry <id>', default: '', description: 'Retry compilation for a failed update' },
+          { flag: 'revert <id>', default: '', description: 'Create a revert update for a merged update' },
+        ]}
+        example={`$ vibe updates
+Open updates:
+  c2d4ef29  Add payment flow    2 features changed
+  a81b3c02  Fix auth redirect   1 feature changed
+
+$ vibe updates close c2d4ef
+Closed update c2d4ef29
+
+$ vibe updates --status merged
+Merged updates:
+  f19e8a31  Dashboard v2        3 features changed`}
+        notes={[
+          'Requires VIBEHUB_TOKEN for authentication',
+          'Update IDs support prefix matching — "c2d4ef" works like the full UUID',
+          'Reads .vibe/remote.json to determine the target project',
+        ]}
+      />
+
       <Section title="Environment Variables">
         <div className="space-y-2">
-          <EnvVar name="GEMINI_API_KEY" description="API key for Gemini. Used by compile and import commands." />
+          <EnvVar name="GEMINI_API_KEY" description="API key for Gemini. Used by compile, check, and import commands." />
+          <EnvVar name="VIBEHUB_TOKEN" description="Authentication token (JWT) for commands that talk to the VibeHub backend. Required by vibe updates." />
           <EnvVar name="VIBEHUB_WEB_URL" description="VibeHub web URL for clone/sync. Default: https://getvibehub.com" />
         </div>
       </Section>

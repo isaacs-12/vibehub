@@ -182,6 +182,17 @@ Tauri 2 + React + Zustand. The local editing environment for developers and non-
 
 The desktop app communicates with the backend exclusively via Tauri IPC (`invoke`). No HTTP during editing — all file I/O goes through Rust commands. HTTP is only used for push (create PR) and pull (fetch merged specs) against the web backend.
 
+**Authentication and API keys:**
+
+The desktop app has no secrets baked in — it's a thin client that authenticates against the web backend. The only compiled-in config is the web URL (`https://getvibehub.com` in production).
+
+1. **Sign in:** The desktop app opens your browser to the web app's Google OAuth flow. After login, the web backend issues a long-lived JWT (365 days) that the desktop stores locally.
+2. **API calls:** Every request from the desktop to the web backend includes this JWT as a `Bearer` token. The web backend validates it and identifies the user.
+3. **Provider keys (Anthropic, Google, OpenAI):** Configured on the web app under your account settings. When the agent compiles your code, it uses your keys (encrypted at rest with AES-256-CBC). The desktop app never sees or stores provider keys directly.
+4. **Free tier:** If you haven't configured your own keys, the platform's default Gemini keys are used with reduced concurrency limits.
+
+In short: sign in once via the desktop app, configure your API keys on the web, and the desktop uses them transparently through the backend. No key management tooling needed on the desktop side.
+
 **Key Rust commands (`src-tauri/src/commands/mod.rs`):**
 
 | Command | Description |

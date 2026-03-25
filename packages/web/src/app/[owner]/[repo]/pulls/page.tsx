@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { GitPullRequest } from 'lucide-react';
 import { getStore } from '@/lib/data/store';
+import UpdatesFilter from '@/components/VibePR/UpdatesFilter';
 
 interface Props {
   params: { owner: string; repo: string };
@@ -45,39 +46,7 @@ export default async function PullRequestsPage({ params }: Props) {
           </p>
         </div>
       ) : (
-        <div className="border border-border rounded-lg overflow-hidden">
-          {prs.map((pr, i) => (
-            <Link
-              key={pr.id}
-              href={`/${owner}/${repo}/pulls/${pr.id}`}
-              className={`flex items-start gap-3 px-4 py-3 hover:bg-canvas-subtle transition-colors ${
-                i !== 0 ? 'border-t border-border' : ''
-              }`}
-            >
-              <GitPullRequest
-                size={16}
-                className={`mt-0.5 shrink-0 ${pr.status === 'merged' ? 'text-accent-emphasis' : 'text-success'}`}
-              />
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-fg hover:text-accent-emphasis">{pr.title}</div>
-                <div className="text-xs text-fg-muted mt-0.5">
-                  by {pr.author}
-                </div>
-              </div>
-              <div className="flex items-center gap-3 text-xs text-fg-muted shrink-0">
-                <span className={`px-1.5 py-0.5 rounded-full border text-xs ${
-                  pr.status === 'open'
-                    ? 'border-success/30 text-success bg-success/10'
-                    : pr.status === 'merged'
-                    ? 'border-accent/30 text-accent-emphasis bg-accent-subtle'
-                    : 'border-border text-fg-muted'
-                }`}>
-                  {pr.status === 'open' ? 'In review' : pr.status === 'merged' ? 'Applied' : pr.status}
-                </span>
-              </div>
-            </Link>
-          ))}
-        </div>
+        <UpdatesFilter prs={prs} owner={owner} repo={repo} />
       )}
     </div>
   );

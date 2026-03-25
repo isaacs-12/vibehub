@@ -218,9 +218,16 @@ vibe import --repo .      # extract vibe files from an existing codebase using G
 vibe read                 # print all vibe files to stdout
 vibe compile              # generate code from vibes + typecheck + tests
 vibe check                # validate without generating (safe for CI)
+vibe updates              # list updates for the project (defaults to list)
+vibe updates list         # list updates, optionally filter: --status open|merged|closed
+vibe updates close <id>   # close an open update without merging
+vibe updates reopen <id>  # reopen a closed update
+vibe updates retry <id>   # retry compilation for a failed update
 ```
 
 `vibe clone` writes `.vibe/remote.json` automatically. This is how the desktop app knows where to push without any manual configuration — push reads this file and uses it.
+
+The `vibe updates` commands require `VIBEHUB_TOKEN` (a JWT signed with `AUTH_SECRET`) for authentication and `.vibe/remote.json` to know which project to target. Update IDs support prefix matching — `vibe updates close c2d4ef` works just like `c2d4ef29-71bc-...`.
 
 ---
 
@@ -330,6 +337,25 @@ Single static binary, no runtime dependency, fast cold start. A developer runnin
 
 **Why not just use GitHub?**
 GitHub's PRs are code-level. You review diffs of files. VibeHub's PRs are spec-level — you review diffs of *intent*. A non-technical stakeholder can read a vibe diff and understand exactly what changed and why. They cannot read a code diff and understand that.
+
+**Why no branches-on-branches, rebase, revert, or cross-update merging?**
+
+This was an intentional decision. VibeHub's audience is people who describe what they want — not developers managing dependency chains between feature branches. An "update" is a change proposal to a product specification, not a git branch. The collaborative model is: describe a change → review intent → apply or discard.
+
+We deliberately omitted these git-power-user features:
+
+- **Stacking updates (branches on branches):** Importing git's branch dependency model would add complexity that directly contradicts the goal of making development accessible. A non-technical user doesn't think "I need to rebase my auth feature onto my payments feature." They think "I want both changes."
+- **Cross-update merge:** Merging one update into another is a developer workflow pattern that doesn't map to this audience. If two updates conflict, the conflict is resolved at apply time via the 3-way merge with optional AI feathering.
+- **Revert:** Once an update is applied, the spec moves forward. The right way to undo is to describe a new change that undoes the previous one — which is clearer in intent than a mechanical revert.
+- **Rebase / sync with main:** Conflict detection already happens at merge time. Proactively surfacing conflicts before apply is a potential future improvement, but it should be framed as "heads up, main has moved" — not as a rebase operation.
+
+What we *do* support are the essential lifecycle operations that every proposal system needs:
+- **Close:** "I changed my mind." Every system that accepts proposals needs a way to reject them.
+- **Reopen:** "Actually, let's reconsider." Reversing a close is low-risk and useful.
+- **Retry compilation:** If the AI failed to generate code, try again. Failed jobs shouldn't be dead ends.
+- **Status filtering:** Once you have more than a few updates, you need to see what's open vs. done vs. discarded.
+
+If we revisit this decision later, the likely path is surfacing conflict warnings earlier (before apply) rather than adding git branching semantics. The principle is: keep the model simple for the audience.
 
 ---
 

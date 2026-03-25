@@ -1,13 +1,15 @@
 import React from 'react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { GitPullRequest, GitMerge, Code2 } from 'lucide-react';
+import { GitPullRequest, GitMerge, Code2, Ban } from 'lucide-react';
 import { getStore } from '@/lib/data/store';
 import { auth } from '@/lib/auth';
 import IntentDiff from '@/components/VibePR/IntentDiff';
 import ImplementationProofs from '@/components/VibePR/ImplementationProofs';
 import ReviewThread from '@/components/VibePR/ReviewThread';
 import MergeButton from '@/components/VibePR/MergeButton';
+import CloseReopenButton from '@/components/VibePR/CloseReopenButton';
+import RetryCompileButton from '@/components/VibePR/RetryCompileButton';
 import CompileProgress from '@/components/VibePR/CompileProgress';
 
 interface Props {
@@ -51,24 +53,32 @@ export default async function VibePRPage({ params }: Props) {
                 ? 'bg-success/10 text-success border-success/30'
                 : pr.status === 'merged'
                 ? 'bg-accent-subtle text-accent-emphasis border-accent/30'
-                : 'bg-canvas-subtle text-fg-muted border-border'
+                : 'bg-red-500/10 text-red-400 border-red-400/30'
             }`}>
-              {pr.status === 'merged' ? <GitMerge size={11} /> : <GitPullRequest size={11} />}
-              {pr.status}
+              {pr.status === 'merged' ? <GitMerge size={11} /> : pr.status === 'closed' ? <Ban size={11} /> : <GitPullRequest size={11} />}
+              {pr.status === 'closed' ? 'closed' : pr.status}
             </span>
             <span className="text-fg-muted">
               proposed by <strong className="text-fg">{pr.author}</strong>
             </span>
           </div>
         </div>
-        {pr.status === 'open' && isOwner && (
-          <MergeButton prId={pr.id} headBranch={pr.headBranch} />
-        )}
-        {pr.status === 'merged' && (
-          <div className="text-xs text-fg-muted bg-accent-subtle border border-accent/30 rounded-lg px-3 py-2">
-            <div className="font-medium text-accent-emphasis">Applied</div>
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          {pr.status === 'open' && isOwner && (
+            <>
+              <CloseReopenButton prId={pr.id} status={pr.status} />
+              <MergeButton prId={pr.id} headBranch={pr.headBranch} />
+            </>
+          )}
+          {pr.status === 'closed' && isOwner && (
+            <CloseReopenButton prId={pr.id} status={pr.status} />
+          )}
+          {pr.status === 'merged' && (
+            <div className="text-xs text-fg-muted bg-accent-subtle border border-accent/30 rounded-lg px-3 py-2">
+              <div className="font-medium text-accent-emphasis">Applied</div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Intent Diff — semantic view by default, content diff toggle */}
@@ -89,6 +99,11 @@ export default async function VibePRPage({ params }: Props) {
         {compileJob && (
           <div className="mb-4">
             <CompileProgress jobId={compileJob.id} initialStatus={compileJob.status} />
+            {isOwner && (
+              <div className="mt-2">
+                <RetryCompileButton prId={pr.id} jobStatus={compileJob.status} />
+              </div>
+            )}
           </div>
         )}
         <ImplementationProofs implementationProofs={pr.intentDiff?.implementationProofs ?? []} />

@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { ChevronRight } from 'lucide-react';
+import CodeBlock from './CodeBlock';
 
 interface Props {
   implementationProofs: { path: string; content: string }[];
@@ -50,9 +51,7 @@ export default function ImplementationProofs({ implementationProofs }: Props) {
               </span>
             </button>
             {isExpanded && (
-              <pre className="px-4 py-3 text-xs font-mono text-fg-muted overflow-x-auto overflow-y-auto max-h-96 leading-relaxed bg-canvas-inset whitespace-pre-wrap">
-                {content}
-              </pre>
+              <CodeBlock code={content} filePath={path} />
             )}
           </div>
         );

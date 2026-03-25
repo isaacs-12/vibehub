@@ -82,7 +82,8 @@ help:
 	@echo "    make secrets-create Create all secret placeholders in Secret Manager"
 	@echo ""
 	@echo "  $(CYAN)Quality$(RESET)"
-	@echo "    make lint           Run pre-commit on all files"
+	@echo "    make test           Run all tests (web + CLI)"
+	@echo "    make lint           Run pre-commit on all files (includes tests)"
 	@echo "    make clean          Remove build artefacts and caches"
 	@echo ""
 
@@ -345,7 +346,16 @@ secrets-create: gcp-check
 	@echo "  Now add values:  echo 'your-value' | gcloud secrets versions add SECRET_NAME --data-file=-"
 
 # ── Quality ───────────────────────────────────────────────────────────────────
-.PHONY: lint
+.PHONY: test lint
+test:
+	@echo "  Running web tests…"
+	@cd packages/web && npx vitest run
+	@echo ""
+	@echo "  Running CLI tests…"
+	@cd packages/cli && go test ./internal/api/...
+	@echo ""
+	@echo "  $(GREEN)✔ All tests passed$(RESET)"
+
 lint: venv
 	$(VENV)/bin/pre-commit run --all-files
 

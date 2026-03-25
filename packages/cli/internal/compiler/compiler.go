@@ -143,7 +143,8 @@ func ms(t time.Time) int64 { return time.Since(t).Milliseconds() }
 func PrintReport(r *CompilationReport) {
 	hr := color.HiBlackString("  " + strings.Repeat("─", 58))
 
-	color.New(color.Bold).Println("  Phases\n")
+	color.New(color.Bold).Print("  Phases\n")
+	fmt.Println()
 	printPhase("Codegen", r.Phases.Codegen)
 	printPhase("Typecheck", r.Phases.Typecheck)
 	printPhase("Tests", r.Phases.Tests)
@@ -158,7 +159,8 @@ func PrintReport(r *CompilationReport) {
 		}
 	}
 	if len(typeErrs) > 0 {
-		color.New(color.Bold, color.FgRed).Println("  TypeScript / Type Errors\n")
+		color.New(color.Bold, color.FgRed).Print("  TypeScript / Type Errors\n")
+		fmt.Println()
 		for _, e := range typeErrs {
 			loc := ""
 			if e.File != "" {
@@ -170,7 +172,8 @@ func PrintReport(r *CompilationReport) {
 	}
 
 	// Feature scores
-	color.New(color.Bold).Println("  Feature Requirement Scores\n")
+	color.New(color.Bold).Print("  Feature Requirement Scores\n")
+	fmt.Println()
 	for _, f := range r.Features {
 		scoreColor := color.New(color.FgRed)
 		if f.RequirementScore >= 90 {

@@ -7,7 +7,7 @@ use commands::{
     apply_chat_to_vibe_file, chat_with_vibes, compile_vibes, create_new_project,
     delete_vibe_file, generate_integration, get_git_state, get_mapped_code, git_checkout,
     git_create_branch, git_init, list_tools, list_vibe_features, load_chats,
-    merge_branch_locally, pull_from_remote, push_branch_to_backend, read_remote_config,
+    merge_branch_locally, pull_from_remote, push_branch_to_backend, read_remote_config, sync_branch_with_main, git_delete_branch,
     read_tool_config, register_project_as_tool, rename_vibe_file, run_project, save_chats,
     save_tool_config, stop_project, unregister_tool, write_integration_file, write_remote_config,
     write_vibe_file, RunState,
@@ -257,6 +257,8 @@ pub fn run() {
             create_new_project,
             get_app_version,
             check_for_updates,
+            sync_branch_with_main,
+            git_delete_branch,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

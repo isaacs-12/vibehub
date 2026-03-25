@@ -139,11 +139,42 @@ var updatesRetryCmd = &cobra.Command{
 	},
 }
 
+var updatesRevertCmd = &cobra.Command{
+	Use:   "revert <update-id>",
+	Short: "Create a revert update for a merged update",
+	Long:  "Creates a new open update that reverses the changes from a merged update. The revert goes through the normal review and merge flow, so changes made after the original are handled safely.",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		_, client, err := resolveRemoteClient(updatesDir)
+		if err != nil {
+			return err
+		}
+
+		prID, err := resolveUpdateID(client, args[0], updatesDir)
+		if err != nil {
+			return err
+		}
+
+		revertPR, err := client.RevertPR(prID)
+		if err != nil {
+			return fmt.Errorf("failed to create revert: %w", err)
+		}
+
+		id := revertPR.ID
+		if len(id) > 8 {
+			id = id[:8]
+		}
+		color.Green("✔ Revert update created: #%s — %s", id, revertPR.Title)
+		color.HiBlack("  Review and merge it to apply the revert.")
+		return nil
+	},
+}
+
 func init() {
 	updatesCmd.PersistentFlags().StringVarP(&updatesDir, "dir", "d", ".", "Project directory")
 	updatesListCmd.Flags().StringP("status", "s", "", "Filter by status: open, merged, closed")
 
-	updatesCmd.AddCommand(updatesListCmd, updatesCloseCmd, updatesReopenCmd, updatesRetryCmd)
+	updatesCmd.AddCommand(updatesListCmd, updatesCloseCmd, updatesReopenCmd, updatesRetryCmd, updatesRevertCmd)
 
 	// Make `vibe updates` with no subcommand default to `list`
 	updatesCmd.RunE = updatesListCmd.RunE

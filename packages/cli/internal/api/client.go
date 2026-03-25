@@ -166,6 +166,24 @@ func (c *Client) RetryCompile(prID string) error {
 	return nil
 }
 
+// RevertPR creates a revert update for a merged PR.
+func (c *Client) RevertPR(prID string) (*PR, error) {
+	body, status, err := c.do("POST", fmt.Sprintf("/api/prs/%s/revert", prID), nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != 201 {
+		return nil, parseAPIError(body, status)
+	}
+	var resp struct {
+		PR PR `json:"pr"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("invalid response: %w", err)
+	}
+	return &resp.PR, nil
+}
+
 func parseAPIError(body []byte, status int) error {
 	var errResp struct {
 		Error string `json:"error"`

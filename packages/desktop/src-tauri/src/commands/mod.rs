@@ -931,6 +931,80 @@ pub async fn merge_branch_locally(root: String, branch: String) -> Result<String
     merge_result.map(|_| format!("Merged '{}' into main. Checkout main to inspect.", branch))
 }
 
+/// Merge main into the current feature branch so it's up-to-date.
+/// This is the "sync with main" operation — brings latest main changes into your branch.
+#[tauri::command]
+pub async fn sync_branch_with_main(root: String) -> Result<String, String> {
+    let root_path = PathBuf::from(&root);
+
+    let repo = git2::Repository::open(&root_path).map_err(|e| e.to_string())?;
+    let current = repo.head()
+        .ok()
+        .and_then(|h| h.shorthand().map(String::from))
+        .unwrap_or_else(|| "main".to_string());
+    drop(repo);
+
+    if current == "main" || current == "master" {
+        return Err("Already on main — nothing to sync.".to_string());
+    }
+
+    // Verify main branch exists
+    let repo = git2::Repository::open(&root_path).map_err(|e| e.to_string())?;
+    repo.find_branch("main", git2::BranchType::Local)
+        .map_err(|_| "No local 'main' branch found.".to_string())?;
+    drop(repo);
+
+    let run = |args: &[&str]| -> Result<String, String> {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&root_path)
+            .output()
+            .map_err(|e| format!("Failed to run git: {}", e))?;
+        if out.status.success() {
+            Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+        } else {
+            Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+        }
+    };
+
+    // Merge main into current branch (stay on current branch)
+    run(&["merge", "main", "-m", &format!("Sync '{}' with main", current)])?;
+
+    Ok(format!("Synced '{}' with latest main.", current))
+}
+
+/// Delete a local branch. Cannot delete the current branch or main/master.
+#[tauri::command]
+pub async fn git_delete_branch(root: String, branch: String) -> Result<String, String> {
+    let root_path = PathBuf::from(&root);
+
+    if branch == "main" || branch == "master" {
+        return Err("Cannot delete the main branch.".to_string());
+    }
+
+    let repo = git2::Repository::open(&root_path).map_err(|e| e.to_string())?;
+    let current = repo.head()
+        .ok()
+        .and_then(|h| h.shorthand().map(String::from))
+        .unwrap_or_default();
+    if current == branch {
+        return Err(format!("Cannot delete the currently checked-out branch '{}'. Switch to another branch first.", branch));
+    }
+    drop(repo);
+
+    let out = std::process::Command::new("git")
+        .args(["branch", "-d", &branch])
+        .current_dir(&root_path)
+        .output()
+        .map_err(|e| format!("Failed to run git: {}", e))?;
+
+    if out.status.success() {
+        Ok(format!("Deleted branch '{}'.", branch))
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
 /// Read .vibe/remote.json and return its fields. Returns empty strings if the file doesn't exist.
 #[tauri::command]
 pub async fn read_remote_config(root: String) -> Result<serde_json::Value, String> {

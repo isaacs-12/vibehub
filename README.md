@@ -223,6 +223,7 @@ vibe updates list         # list updates, optionally filter: --status open|merge
 vibe updates close <id>   # close an open update without merging
 vibe updates reopen <id>  # reopen a closed update
 vibe updates retry <id>   # retry compilation for a failed update
+vibe updates revert <id>  # create a revert update for a merged update
 ```
 
 `vibe clone` writes `.vibe/remote.json` automatically. This is how the desktop app knows where to push without any manual configuration — push reads this file and uses it.
@@ -346,7 +347,7 @@ We deliberately omitted these git-power-user features:
 
 - **Stacking updates (branches on branches):** Importing git's branch dependency model would add complexity that directly contradicts the goal of making development accessible. A non-technical user doesn't think "I need to rebase my auth feature onto my payments feature." They think "I want both changes."
 - **Cross-update merge:** Merging one update into another is a developer workflow pattern that doesn't map to this audience. If two updates conflict, the conflict is resolved at apply time via the 3-way merge with optional AI feathering.
-- **Revert:** Once an update is applied, the spec moves forward. The right way to undo is to describe a new change that undoes the previous one — which is clearer in intent than a mechanical revert.
+- **Revert:** Supported, but implemented safely. A revert doesn't naively restore a snapshot (which would undo later changes too). Instead, it creates a new update where the 3-way merge base is the state the original PR created and the head is the state before it. When this revert update is merged, the existing 3-way merge infrastructure handles interactions with subsequent changes: files only touched by the original are cleanly reverted, files touched by both the original and later updates surface as conflicts for human resolution. The revert is itself a reviewable proposal — consistent with the "every change goes through review" model.
 - **Rebase / sync with main:** Conflict detection already happens at merge time. Proactively surfacing conflicts before apply is a potential future improvement, but it should be framed as "heads up, main has moved" — not as a rebase operation.
 
 What we *do* support are the essential lifecycle operations that every proposal system needs:

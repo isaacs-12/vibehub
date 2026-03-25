@@ -1,12 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { GitBranch, GitFork, GitMerge, ArrowUp, ArrowDown, Loader2, User, Settings, ExternalLink, Copy, Check } from 'lucide-react';
+import { GitBranch, GitFork, GitMerge, ArrowUp, ArrowDown, Loader2, User, Settings, ExternalLink, Copy, Check, RefreshCw, Trash2 } from 'lucide-react';
 import { useVibeStore } from '../../store/index.ts';
 import { useGit } from '../../hooks/useGit.ts';
 import { startLogin, getLoginUrl, handleAuthDeepLink } from '../../lib/auth.ts';
 
 export default function StatusBar() {
-  const { currentBranch, branches, projectRoot, codePeekFiles, chatSessions, setChatSessions, setFeatures, authUser, authToken, clearAuth } = useVibeStore();
-  const { switchBranch, createBranch } = useGit();
+  const { currentBranch, branches, projectRoot, codePeekFiles, chatSessions, setChatSessions, authUser, authToken, clearAuth } = useVibeStore();
+  const { switchBranch, createBranch, syncWithMain, deleteBranch, reloadFeatures } = useGit();
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
   const [newBranchOpen, setNewBranchOpen] = useState(false);
   const [newBranchName, setNewBranchName] = useState('');
@@ -14,6 +14,7 @@ export default function StatusBar() {
   const [pushLoading, setPushLoading] = useState(false);
   const [pullLoading, setPullLoading] = useState(false);
   const [mergeLoading, setMergeLoading] = useState(false);
+  const [syncLoading, setSyncLoading] = useState(false);
   const [remoteModal, setRemoteModal] = useState<{ owner: string; repo: string; webUrl: string } | null>(null);
   const [signInOpen, setSignInOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -117,6 +118,11 @@ export default function StatusBar() {
 
   async function handlePush() {
     if (!projectRoot) return;
+    if (isOnMain) {
+      const { message } = await import('@tauri-apps/plugin-dialog');
+      await message('Create a feature branch before pushing. You can\'t propose changes directly from main.', { title: 'Push', kind: 'warning' });
+      return;
+    }
     setPushLoading(true);
     try {
       const result = await doPush();
@@ -178,10 +184,10 @@ export default function StatusBar() {
     setPullLoading(true);
     try {
       const { invoke } = await import('@tauri-apps/api/core');
-      const pulled = await invoke<Array<{ name: string; path: string; content: string }>>('pull_from_remote', { root: projectRoot, authToken: authToken ?? null });
-      setFeatures(pulled.map((f) => ({ name: f.name, path: f.path, content: f.content })));
+      await invoke<Array<{ name: string; path: string; content: string }>>('pull_from_remote', { root: projectRoot, authToken: authToken ?? null });
+      await reloadFeatures();
       const { message } = await import('@tauri-apps/plugin-dialog');
-      await message(`Pulled ${pulled.length} vibe file${pulled.length !== 1 ? 's' : ''} from main.`, { title: 'Pull', kind: 'info' });
+      await message('Pulled latest vibes from main.', { title: 'Pull', kind: 'info' });
     } catch (err) {
       const { message } = await import('@tauri-apps/plugin-dialog');
       await message(String(err), { title: 'Pull', kind: 'error' });
@@ -204,6 +210,7 @@ export default function StatusBar() {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       const result = await invoke<string>('merge_branch_locally', { root: projectRoot, branch: currentBranch });
+      await reloadFeatures();
       const { message } = await import('@tauri-apps/plugin-dialog');
       await message(result, { title: 'Merge', kind: 'info' });
     } catch (err) {
@@ -211,6 +218,44 @@ export default function StatusBar() {
       await message(String(err), { title: 'Merge', kind: 'error' });
     } finally {
       setMergeLoading(false);
+    }
+  }
+
+  // ── Sync with main ────────────────────────────────────────────────────────────
+
+  async function handleSync() {
+    if (!projectRoot || isOnMain) return;
+    setSyncLoading(true);
+    try {
+      await syncWithMain();
+      const { message } = await import('@tauri-apps/plugin-dialog');
+      await message(`Synced "${currentBranch}" with latest main.`, { title: 'Sync', kind: 'info' });
+    } catch (err) {
+      const { message } = await import('@tauri-apps/plugin-dialog');
+      await message(String(err), { title: 'Sync', kind: 'error' });
+    } finally {
+      setSyncLoading(false);
+    }
+  }
+
+  // ── Delete branch ─────────────────────────────────────────────────────────────
+
+  async function handleDeleteBranch(branch: string) {
+    if (!projectRoot) return;
+    const { ask } = await import('@tauri-apps/plugin-dialog');
+    const confirmed = await ask(
+      `Delete local branch "${branch}"?\n\nThis cannot be undone.`,
+      { title: 'Delete Branch', kind: 'warning' },
+    );
+    if (!confirmed) return;
+    try {
+      await deleteBranch(branch);
+      setBranchMenuOpen(false);
+      const { message } = await import('@tauri-apps/plugin-dialog');
+      await message(`Branch "${branch}" deleted.`, { title: 'Delete Branch', kind: 'info' });
+    } catch (err) {
+      const { message } = await import('@tauri-apps/plugin-dialog');
+      await message(String(err), { title: 'Delete Branch', kind: 'error' });
     }
   }
 
@@ -234,7 +279,8 @@ export default function StatusBar() {
           <SyncBtn
             onClick={handlePush}
             loading={pushLoading}
-            title={`Push "${currentBranch}" to remote (create PR)`}
+            disabled={isOnMain}
+            title={isOnMain ? 'Create a feature branch to propose changes' : `Push "${currentBranch}" to remote (create PR)`}
             icon={<ArrowUp size={11} />}
           />
           <SyncBtn
@@ -244,12 +290,20 @@ export default function StatusBar() {
             icon={<ArrowDown size={11} />}
           />
           {!isOnMain && (
-            <SyncBtn
-              onClick={handleMerge}
-              loading={mergeLoading}
-              title={`Merge "${currentBranch}" into main`}
-              icon={<GitMerge size={11} />}
-            />
+            <>
+              <SyncBtn
+                onClick={handleSync}
+                loading={syncLoading}
+                title={`Sync "${currentBranch}" with latest main`}
+                icon={<RefreshCw size={11} />}
+              />
+              <SyncBtn
+                onClick={handleMerge}
+                loading={mergeLoading}
+                title={`Merge "${currentBranch}" into main`}
+                icon={<GitMerge size={11} />}
+              />
+            </>
           )}
         </div>
 
@@ -311,17 +365,32 @@ export default function StatusBar() {
       {/* Branch dropdown */}
       {branchMenuOpen && (
         <div className="absolute bottom-7 left-2 bg-surface-overlay border border-surface-border rounded shadow-xl w-64 py-1 z-50">
-          {branches.map((b) => (
-            <button
-              key={b}
-              onClick={() => { switchBranch(b); setBranchMenuOpen(false); }}
-              className={`w-full text-left px-3 py-1.5 text-xs hover:bg-surface-raised transition-colors ${
-                b === currentBranch ? 'text-accent-light' : 'text-gray-300'
-              }`}
-            >
-              {b === currentBranch ? '✓ ' : '  '}{b}
-            </button>
-          ))}
+          {branches.map((b) => {
+            const isCurrent = b === currentBranch;
+            const isMain = b === 'main' || b === 'master';
+            const canDelete = !isCurrent && !isMain;
+            return (
+              <div key={b} className="flex items-center group">
+                <button
+                  onClick={() => { switchBranch(b); setBranchMenuOpen(false); }}
+                  className={`flex-1 text-left px-3 py-1.5 text-xs hover:bg-surface-raised transition-colors ${
+                    isCurrent ? 'text-accent-light' : 'text-gray-300'
+                  }`}
+                >
+                  {isCurrent ? '✓ ' : '  '}{b}
+                </button>
+                {canDelete && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleDeleteBranch(b); }}
+                    title={`Delete "${b}"`}
+                    className="px-2 py-1.5 text-gray-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
+                  >
+                    <Trash2 size={11} />
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -503,16 +572,17 @@ function SignInModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function SyncBtn({ onClick, loading, title, icon }: {
+function SyncBtn({ onClick, loading, disabled, title, icon }: {
   onClick: () => void;
   loading: boolean;
+  disabled?: boolean;
   title: string;
   icon: React.ReactNode;
 }) {
   return (
     <button
       onClick={onClick}
-      disabled={loading}
+      disabled={loading || disabled}
       title={title}
       className="flex items-center justify-center w-6 h-6 hover:bg-white/10 rounded transition-colors disabled:opacity-50"
     >

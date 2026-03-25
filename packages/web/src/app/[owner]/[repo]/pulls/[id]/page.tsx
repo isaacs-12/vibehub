@@ -10,6 +10,7 @@ import ReviewThread from '@/components/VibePR/ReviewThread';
 import MergeButton from '@/components/VibePR/MergeButton';
 import CloseReopenButton from '@/components/VibePR/CloseReopenButton';
 import RetryCompileButton from '@/components/VibePR/RetryCompileButton';
+import RevertButton from '@/components/VibePR/RevertButton';
 import CompileProgress from '@/components/VibePR/CompileProgress';
 
 interface Props {
@@ -74,9 +75,14 @@ export default async function VibePRPage({ params }: Props) {
             <CloseReopenButton prId={pr.id} status={pr.status} />
           )}
           {pr.status === 'merged' && (
-            <div className="text-xs text-fg-muted bg-accent-subtle border border-accent/30 rounded-lg px-3 py-2">
-              <div className="font-medium text-accent-emphasis">Applied</div>
-            </div>
+            <>
+              <div className="text-xs text-fg-muted bg-accent-subtle border border-accent/30 rounded-lg px-3 py-2">
+                <div className="font-medium text-accent-emphasis">Applied</div>
+              </div>
+              {isOwner && (
+                <RevertButton prId={pr.id} owner={owner} repo={repo} />
+              )}
+            </>
           )}
         </div>
       </div>

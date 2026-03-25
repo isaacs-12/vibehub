@@ -38,6 +38,15 @@ export async function POST(request: Request, { params }: Params) {
 
   const now = new Date().toISOString();
   const headBranch = body.headBranch ?? 'feature/unnamed';
+
+  // Reject PRs that target the base branch — you can't propose changes from main into main
+  const normalizedHead = headBranch.toLowerCase();
+  if (normalizedHead === 'main' || normalizedHead === 'master') {
+    return NextResponse.json(
+      { error: 'Cannot create an update from the main branch. Create a feature branch first.' },
+      { status: 400 },
+    );
+  }
   const isFeatureEntry = (f: unknown) => f && typeof f === 'object' && 'path' in f && 'content' in f;
   const features: { path: string; content: string }[] = Array.isArray(body.features)
     ? body.features.filter(isFeatureEntry)

@@ -181,6 +181,51 @@ func TestNewClientFromRemote(t *testing.T) {
 	}
 }
 
+func TestRevertPR(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		if r.URL.Path != "/api/prs/pr-1/revert" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+			http.Error(w, "not found", 404)
+			return
+		}
+		w.WriteHeader(201)
+		w.Write([]byte(`{"status":"created","pr":{"id":"pr-99","title":"Revert: Add auth","author":"alice","status":"open"}}`))
+	}))
+	defer srv.Close()
+
+	client := &Client{BaseURL: srv.URL, Token: "test-token"}
+	pr, err := client.RevertPR("pr-1")
+	if err != nil {
+		t.Fatalf("RevertPR failed: %v", err)
+	}
+	if pr.Title != "Revert: Add auth" {
+		t.Errorf("expected title 'Revert: Add auth', got %q", pr.Title)
+	}
+	if pr.Status != "open" {
+		t.Errorf("expected status 'open', got %q", pr.Status)
+	}
+}
+
+func TestRevertPR_NotMerged(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(409)
+		w.Write([]byte(`{"error":"Can only revert a merged update"}`))
+	}))
+	defer srv.Close()
+
+	client := &Client{BaseURL: srv.URL, Token: "test-token"}
+	_, err := client.RevertPR("pr-1")
+	if err == nil {
+		t.Fatal("expected error for non-merged PR")
+	}
+	if err.Error() != "Can only revert a merged update" {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
 func TestParseAPIError(t *testing.T) {
 	tests := []struct {
 		body     string

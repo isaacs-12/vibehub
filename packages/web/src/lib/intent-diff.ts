@@ -1,25 +1,25 @@
 /**
  * Semantic intent diffing via LLM.
  *
- * Given two versions of a vibe spec, extracts what actually changed
- * in terms of behavioral intent — ignoring rewording, formatting,
- * and clarifications that don't alter meaning.
+ * Given two versions of a vibe spec, produces a narrative synthesis
+ * of what actually changed in terms of behavioral intent — written
+ * like a mentor explaining changes to a colleague, not a granular list.
  *
  * All files are batched into a single LLM call to avoid rate limits.
  * Model-agnostic: uses Gemini (platform key) by default.
  */
 
-export interface IntentDelta {
-  kind: 'added' | 'removed' | 'modified';
-  summary: string;
-  confidence: number;
+export interface IntentHighlight {
+  kind: 'added' | 'modified' | 'removed';
+  text: string;
 }
 
 export interface FileIntentDiff {
   slug: string;
   path: string;
   status: 'added' | 'removed' | 'modified';
-  deltas: IntentDelta[];
+  /** Synthesized bullet points, each tagged as added/modified/removed intent. */
+  highlights: IntentHighlight[];
   /** True if the LLM call failed for this file — UI should show a distinct state. */
   failed?: boolean;
 }
@@ -36,45 +36,50 @@ function buildBatchPrompt(
 ): string {
   const fileBlocks = fileEntries.map((f) => {
     if (f.status === 'added') {
-      return `### ${f.slug}.md (NEW FILE)\n${f.headContent}`;
+      return `### ${f.slug} (NEW FILE)\n${f.headContent}`;
     }
     if (f.status === 'removed') {
-      return `### ${f.slug}.md (REMOVED FILE)\n${f.baseContent}`;
+      return `### ${f.slug} (REMOVED FILE)\n${f.baseContent}`;
     }
-    return `### ${f.slug}.md (MODIFIED)\n#### Before\n${f.baseContent}\n#### After\n${f.headContent}`;
+    return `### ${f.slug} (MODIFIED)\n#### Before\n${f.baseContent}\n#### After\n${f.headContent}`;
   }).join('\n\n---\n\n');
 
-  return `You are analyzing vibe specification files to extract behavioral intent.
+  return `You are summarizing changes to vibe specification files for a teammate.
 
-A vibe spec describes what a feature should do: behaviors, constraints, data, dependencies.
+A vibe spec describes what a feature should do: behaviors, constraints, data models, dependencies, and UX.
 
-For NEW files: extract every discrete behavioral intent the spec defines. Be thorough — each behavior, capability, constraint, data requirement, dependency, or rule is a separate intent.
+Your job is to write the minimum number of bullet points needed to completely and concisely explain each file's intent. Each bullet should cover one key theme or area, synthesizing related details together. A small change might need one bullet; a large feature might need eight. Don't enumerate every field or constraint individually — group related things together.
 
-For REMOVED files: extract every intent that is being removed.
+Each bullet has a "kind" describing what type of change it represents:
+- "added" — new capability or intent being introduced
+- "modified" — existing intent that changed (e.g. "color scheme changed from red to blue")
+- "removed" — capability or intent being dropped
 
-For MODIFIED files: identify only what INTENT changed between the before/after versions. IGNORE rewording, formatting, and clarifications that don't alter meaning. Only report genuine changes to behavior, constraints, data, or dependencies.
+Guidelines:
+- For NEW files: all bullets will be "added". Cover the core purpose, key data models, how it connects to other features, and any notable UX decisions.
+- For REMOVED files: all bullets will be "removed". What capability is being dropped.
+- For MODIFIED files: each bullet should be tagged based on whether that specific intent was added, changed, or removed within the file. Ignore rewording or formatting. If nothing meaningful changed, use a single "modified" bullet: "Cosmetic changes only — no intent changes"
 
-Respond with a JSON object where each key is a filename (e.g. "plot") and each value is an array of intent objects:
+Respond with a JSON object where each key is the file name (matching the headers below exactly) and each value is an array of objects with "kind" and "text":
+
 {
-  "plot": [
-    { "kind": "added", "summary": "...", "confidence": 1.0 },
-    ...
+  "overview": [
+    { "kind": "added", "text": "Central dashboard that tracks total net worth by aggregating assets and liabilities across monthly snapshots" },
+    { "kind": "added", "text": "Integrates with DataEntry for editing any month's data, and Plot for visualizing trends over time" }
   ],
   "auth": [
-    { "kind": "modified", "summary": "...", "confidence": 0.9 }
+    { "kind": "modified", "text": "Session timeout changed from 30 minutes to 1 hour" },
+    { "kind": "removed", "text": "Dropped support for legacy API key authentication" }
   ]
 }
 
 Rules:
-- "kind" must be "added", "removed", or "modified"
-- "summary" is one clear sentence describing the intent
-- "confidence" is 0.0–1.0 (use 1.0 for new/removed files since intents are directly stated)
-- For new files, EVERY intent must be extracted — do not summarize or skip any
-- For modified files, only report genuine intent changes
-- Include ALL files from the input — every file key must appear in the output
-- If a modified file has no meaningful intent changes, use an empty array for that file
-
-Output ONLY the JSON object. No code fences, no explanation.
+- Each bullet is one concise line — no sub-bullets, no line breaks
+- Write in plain English, as if explaining to a smart colleague
+- Synthesize related concepts into single bullets rather than listing individually
+- Use as few bullets as needed to fully cover the key points — no filler, no padding
+- Every file from the input must appear as a key in the output
+- Output ONLY the JSON object — no code fences, no explanation
 
 ## Files to analyze
 
@@ -92,7 +97,7 @@ function getSlug(path: string): string {
   return (path.split('/').pop() ?? path).replace(/\.md$/, '');
 }
 
-async function callGemini(prompt: string): Promise<Record<string, IntentDelta[]>> {
+async function callGemini(prompt: string): Promise<Record<string, IntentHighlight[]>> {
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
   if (!apiKey) throw new Error('No Gemini API key configured for intent diffing');
 
@@ -104,8 +109,8 @@ async function callGemini(prompt: string): Promise<Record<string, IntentDelta[]>
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 8192,
+          temperature: 0.2,
+          maxOutputTokens: 4096,
           responseMimeType: 'application/json',
         },
       }),
@@ -142,22 +147,17 @@ async function callGemini(prompt: string): Promise<Record<string, IntentDelta[]>
     throw new Error('LLM returned non-object JSON');
   }
 
-  // Validate and filter each file's deltas
-  // Normalize keys: the LLM may return "overview.md" but we use "overview" as the slug
-  const result: Record<string, IntentDelta[]> = {};
+  // Normalize keys (LLM may return "overview.md" instead of "overview")
+  const validKinds = ['added', 'modified', 'removed'];
+  const result: Record<string, IntentHighlight[]> = {};
   for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
     if (!Array.isArray(value)) {
       console.warn(`[intent-diff] Non-array value for ${key}, skipping`);
       continue;
     }
-    const normalizedKey = key.replace(/\.md$/, '');
-    result[normalizedKey] = value.filter(
-      (d: any) =>
-        d &&
-        typeof d.kind === 'string' &&
-        typeof d.summary === 'string' &&
-        typeof d.confidence === 'number' &&
-        ['added', 'removed', 'modified'].includes(d.kind),
+    result[key.replace(/\.md$/, '')] = value.filter(
+      (v: any): v is IntentHighlight =>
+        v && typeof v.text === 'string' && typeof v.kind === 'string' && validKinds.includes(v.kind),
     );
   }
 
@@ -190,30 +190,27 @@ export async function computeIntentDiff(
     return { files: [], computedAt: new Date().toISOString() };
   }
 
-  // Single batched LLM call for all files
   const prompt = buildBatchPrompt(entries);
-  let llmResult: Record<string, IntentDelta[]>;
+  let llmResult: Record<string, IntentHighlight[]>;
 
   try {
     llmResult = await callGemini(prompt);
   } catch (e) {
     console.error('[intent-diff] Batch call failed:', e);
-    // Mark all files as failed so the UI can show a distinct state
     return {
-      files: entries.map((f) => ({ slug: f.slug, path: f.path, status: f.status, deltas: [], failed: true })),
+      files: entries.map((f) => ({ slug: f.slug, path: f.path, status: f.status, highlights: [], failed: true })),
       computedAt: new Date().toISOString(),
     };
   }
 
   const files: FileIntentDiff[] = entries.map((entry) => {
-    const deltas = llmResult[entry.slug] ?? [];
-    // If the LLM returned nothing for a new/removed file, mark as failed
-    const failed = deltas.length === 0 && entry.status !== 'modified' && !llmResult[entry.slug];
-    return { slug: entry.slug, path: entry.path, status: entry.status, deltas, failed };
+    const highlights = llmResult[entry.slug] ?? [];
+    const failed = highlights.length === 0 && !(entry.slug in llmResult);
+    return { slug: entry.slug, path: entry.path, status: entry.status, highlights, failed };
   });
 
   return {
-    files: files.filter((f) => f.status === 'added' || f.status === 'removed' || f.deltas.length > 0 || f.failed),
+    files: files.filter((f) => f.highlights.length > 0 || f.failed),
     computedAt: new Date().toISOString(),
   };
 }

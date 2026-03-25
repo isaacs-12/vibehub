@@ -1,7 +1,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { GitPullRequest, GitMerge, MessageSquare, CheckCircle2, Code2 } from 'lucide-react';
+import { GitPullRequest, GitMerge, Code2 } from 'lucide-react';
 import { getStore } from '@/lib/data/store';
 import { auth } from '@/lib/auth';
 import IntentDiff from '@/components/VibePR/IntentDiff';
@@ -69,25 +69,6 @@ export default async function VibePRPage({ params }: Props) {
             <div className="font-medium text-accent-emphasis">Applied</div>
           </div>
         )}
-      </div>
-
-      {/* Tabs */}
-      <div className="flex border-b border-border mb-6 text-sm">
-        <div className="flex items-center gap-1.5 px-4 py-2 border-b-2 border-accent text-fg font-medium">
-          <CheckCircle2 size={12} />
-          What changed
-        </div>
-        <div className="flex items-center gap-1.5 px-4 py-2 border-b-2 border-transparent text-fg-muted">
-          <Code2 size={12} />
-          Generated code
-        </div>
-        <div className="flex items-center gap-1.5 px-4 py-2 border-b-2 border-transparent text-fg-muted">
-          <MessageSquare size={12} />
-          Discussion
-          {comments.length > 0 && (
-            <span className="ml-1 bg-canvas-subtle border border-border rounded-full px-1.5 text-xs">{comments.length}</span>
-          )}
-        </div>
       </div>
 
       {/* Intent Diff — semantic view by default, content diff toggle */}

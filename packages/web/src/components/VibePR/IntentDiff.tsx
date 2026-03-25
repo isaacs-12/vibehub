@@ -3,10 +3,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   FilePlus2, FileEdit, FileX2, Eye, Code2, Loader2,
-  Plus, Minus, PenLine, ChevronDown, ChevronRight,
+  ChevronDown, ChevronRight,
 } from 'lucide-react';
 import DiffView from './DiffView';
-import type { IntentDiffResult, FileIntentDiff, IntentDelta } from '@/lib/intent-diff';
+import type { IntentDiffResult, FileIntentDiff, IntentHighlight } from '@/lib/intent-diff';
 
 interface VibeFile {
   path: string;
@@ -25,44 +25,27 @@ type ViewMode = 'intent' | 'content';
 
 // ─── Semantic intent view ────────────────────────────────────────────────────
 
-const DELTA_ICON = {
-  added:    { icon: Plus,    color: 'text-green-400', bg: 'bg-green-500/10', label: 'New' },
-  removed:  { icon: Minus,   color: 'text-red-400',   bg: 'bg-red-500/10',   label: 'Removed' },
-  modified: { icon: PenLine, color: 'text-yellow-400', bg: 'bg-yellow-500/10', label: 'Changed' },
-} as const;
-
-function DeltaRow({ delta }: { delta: IntentDelta }) {
-  const meta = DELTA_ICON[delta.kind];
-  const Icon = meta.icon;
-
-  return (
-    <div className={`flex items-start gap-3 px-3 py-2 rounded-lg ${meta.bg}`}>
-      <div className={`mt-0.5 ${meta.color}`}>
-        <Icon size={14} />
-      </div>
-      <div className="flex-1 min-w-0">
-        <span className="text-sm text-fg">{delta.summary}</span>
-      </div>
-      <span className={`text-xs ${meta.color} shrink-0`}>{meta.label}</span>
-    </div>
-  );
-}
-
 const FILE_STATUS_META = {
   added:    { icon: FilePlus2, color: 'text-green-400', label: 'New file' },
   removed:  { icon: FileX2,   color: 'text-red-400',   label: 'Removed' },
   modified: { icon: FileEdit,  color: 'text-yellow-400', label: 'Modified' },
 } as const;
 
+const HIGHLIGHT_META = {
+  added:    { bg: 'bg-green-500/8',  bullet: 'text-green-400' },
+  modified: { bg: 'bg-yellow-500/8', bullet: 'text-yellow-400' },
+  removed:  { bg: 'bg-red-500/8',    bullet: 'text-red-400' },
+} as const;
+
 function SemanticFileBlock({ file }: { file: FileIntentDiff }) {
   const [expanded, setExpanded] = useState(true);
   const meta = FILE_STATUS_META[file.status];
   const Icon = meta.icon;
-  // For new/removed files, show all deltas (they're direct extractions).
-  // For modified files, filter by confidence to avoid surfacing rewording noise.
-  const visibleDeltas = file.status === 'modified'
-    ? file.deltas.filter((d) => d.confidence >= 0.7)
-    : file.deltas;
+  // Handle old cached data shapes: `summary` (string) or `highlights` as string[]
+  const raw = file.highlights ?? ((file as any).summary ? [(file as any).summary] : []);
+  const highlights: IntentHighlight[] = raw.map((h: any) =>
+    typeof h === 'string' ? { kind: file.status, text: h } : h,
+  );
 
   return (
     <div className="border border-border rounded-lg overflow-hidden">
@@ -74,30 +57,30 @@ function SemanticFileBlock({ file }: { file: FileIntentDiff }) {
         <Icon size={13} className={meta.color} />
         <span className="font-mono text-xs text-fg">{file.path}</span>
         <span className={`text-xs ${meta.color}`}>{meta.label}</span>
-        {file.failed ? (
+        {file.failed && (
           <span className="ml-auto text-xs text-fg-subtle italic">analysis failed</span>
-        ) : visibleDeltas.length > 0 ? (
-          <span className="ml-auto text-xs text-fg-muted">
-            {visibleDeltas.length} intent change{visibleDeltas.length !== 1 ? 's' : ''}
-          </span>
-        ) : null}
+        )}
       </button>
 
       {expanded && (
-        <div className="px-3 py-2 space-y-1.5">
-          {file.failed && (
-            <div className="text-sm text-fg-subtle italic px-3 py-2">
+        <div className="px-4 py-3">
+          {file.failed ? (
+            <p className="text-sm text-fg-subtle italic">
               Intent analysis unavailable — switch to &ldquo;Content diff&rdquo; to see raw changes.
-            </div>
+            </p>
+          ) : (
+            <ul className="space-y-1">
+              {highlights.map((h, i) => {
+                const hm = HIGHLIGHT_META[h.kind];
+                return (
+                  <li key={i} className={`flex gap-2 text-sm leading-relaxed px-3 py-1.5 rounded-md ${hm.bg}`}>
+                    <span className={`mt-0.5 shrink-0 ${hm.bullet}`}>&#8226;</span>
+                    <span className="text-fg">{h.text}</span>
+                  </li>
+                );
+              })}
+            </ul>
           )}
-          {!file.failed && visibleDeltas.length === 0 && file.status === 'modified' && (
-            <div className="text-sm text-fg-muted px-3 py-2">
-              No meaningful intent changes — only rewording or formatting.
-            </div>
-          )}
-          {visibleDeltas.map((delta, i) => (
-            <DeltaRow key={i} delta={delta} />
-          ))}
         </div>
       )}
     </div>
@@ -141,18 +124,10 @@ function SemanticView({
     );
   }
 
-  const totalDeltas = result.files.reduce(
-    (sum, f) => sum + (f.status === 'modified'
-      ? f.deltas.filter((d) => d.confidence >= 0.7).length
-      : f.deltas.length),
-    0,
-  );
-
   return (
     <div className="space-y-3">
       <div className="text-xs text-fg-muted">
-        {result.files.length} file{result.files.length !== 1 ? 's' : ''} with intent changes
-        {totalDeltas > 0 && <> — {totalDeltas} delta{totalDeltas !== 1 ? 's' : ''}</>}
+        {result.files.length} file{result.files.length !== 1 ? 's' : ''} changed
       </div>
       {result.files.map((file) => (
         <SemanticFileBlock key={file.slug} file={file} />
@@ -230,10 +205,11 @@ function ContentView({ baseFeatures, headFeatures }: { baseFeatures: VibeFile[];
 
 export default function IntentDiff({ prId, baseFeatures, headFeatures, cachedSemanticDiff }: IntentDiffProps) {
   const [mode, setMode] = useState<ViewMode>('intent');
-  // Treat a cached result where every file failed as if there's no cache — trigger a refetch
-  const usableCache = cachedSemanticDiff && !cachedSemanticDiff.files.every((f) => f.failed)
-    ? cachedSemanticDiff
-    : null;
+  // Treat a cached result where every file failed or uses old data shape as stale — trigger a refetch
+  const isStale = !cachedSemanticDiff
+    || cachedSemanticDiff.files.every((f: any) => f.failed)
+    || cachedSemanticDiff.files.some((f: any) => !f.highlights && !f.failed);
+  const usableCache = isStale ? null : cachedSemanticDiff;
   const [semanticResult, setSemanticResult] = useState<IntentDiffResult | null>(usableCache);
   const [loading, setLoading] = useState(!usableCache);
   const [error, setError] = useState<string | null>(null);

@@ -10,6 +10,10 @@ NPM        := npm
 DC         := docker compose
 DC_RUN     := $(DC) run --rm
 
+# ── Apple Signing (public — embedded in every signed binary) ─────────────────
+APPLE_TEAM_ID        := SP9G9F6T6Q # your 10-char team ID (e.g. ABC1234DEF)
+APPLE_SIGNING_IDENTITY := Developer ID Application: Isaac Smith ($(APPLE_TEAM_ID))
+
 # ── GCP Config ────────────────────────────────────────────────────────────────
 GCP_PROJECT  := vibehub-490503
 GCP_REGION   := us-west1
@@ -75,7 +79,8 @@ help:
 	@echo "    make deploy-web     Build & deploy web to Cloud Run"
 	@echo "    make deploy-agent   Build & deploy agent to Cloud Run"
 	@echo "    make deploy-all     Deploy both web + agent"
-	@echo "    make build-desktop  Build VibeStudio .app/.dmg"
+	@echo "    make build-desktop  Build VibeStudio .app/.dmg (unsigned)"
+	@echo "    make build-desktop-signed  Build signed + notarized .app/.dmg"
 	@echo "    make release VERSION=x.y.z  Bump versions, build all, deploy, create GitHub release"
 	@echo "    make db-migrate-prod  Run Drizzle push against prod DATABASE_URL"
 	@echo "    make secrets-list   List required GCP secrets"
@@ -372,7 +377,7 @@ lint: venv
 #   4. Deploy web + agent to Cloud Run
 #   5. Commit version bump, tag, create GitHub release with all artifacts
 #
-.PHONY: release build-desktop build-cli-all version-bump
+.PHONY: release build-desktop build-desktop-signed build-cli-all version-bump
 
 build-desktop:
 	@echo "  Building VibeStudio…"
@@ -381,6 +386,22 @@ build-desktop:
 	@rm -f packages/desktop/src-tauri/target/release/bundle/macos/rw.*.dmg 2>/dev/null || true
 	$(NPM) run tauri build --workspace=packages/desktop
 	@echo "  $(GREEN)✔ Desktop build complete$(RESET)"
+	@echo "  Artifacts: packages/desktop/src-tauri/target/release/bundle/"
+
+# Signed + notarized build for distribution
+# Uses APPLE_TEAM_ID and APPLE_SIGNING_IDENTITY from above (public, safe to hardcode).
+# Prompts for APPLE_ID and APPLE_PASSWORD if not already in env (secrets, never hardcoded).
+build-desktop-signed:
+	@echo "  Building VibeStudio (signed + notarized)…"
+	@if [ -z "$(APPLE_TEAM_ID)" ]; then echo "  $(RED)✘ Set APPLE_TEAM_ID in Makefile first$(RESET)"; exit 1; fi
+	@hdiutil info 2>/dev/null | grep -B1 'VibeStudio' | grep '/dev/disk' | awk '{print $$1}' | sed 's/s[0-9]*$$//' | sort -u | while read dev; do hdiutil detach "$$dev" -force 2>/dev/null; done || true
+	@rm -f packages/desktop/src-tauri/target/release/bundle/macos/rw.*.dmg 2>/dev/null || true
+	@if [ -z "$$APPLE_ID" ]; then read -p "  Apple ID: " APPLE_ID; export APPLE_ID; fi; \
+	if [ -z "$$APPLE_PASSWORD" ]; then read -s -p "  App-specific password: " APPLE_PASSWORD; echo; export APPLE_PASSWORD; fi; \
+	APPLE_TEAM_ID="$(APPLE_TEAM_ID)" \
+	APPLE_SIGNING_IDENTITY="$(APPLE_SIGNING_IDENTITY)" \
+	$(NPM) run tauri build --workspace=packages/desktop
+	@echo "  $(GREEN)✔ Desktop build signed + notarized$(RESET)"
 	@echo "  Artifacts: packages/desktop/src-tauri/target/release/bundle/"
 
 build-cli-all:
@@ -416,7 +437,7 @@ version-bump:
 	@sed -i '' 's/"version": *"[^"]*"/"version": "$(VERSION)"/' packages/desktop/src-tauri/tauri.conf.json
 	@echo "  $(GREEN)✔ All manifests bumped to $(VERSION)$(RESET)"
 
-release: version-bump build-cli-all build-desktop deploy-all
+release: version-bump build-cli-all build-desktop-signed deploy-all
 	@if [ -z "$(VERSION)" ]; then echo "  $(RED)✘ VERSION required$(RESET)  Usage: make release VERSION=0.2.0"; exit 1; fi
 	@command -v gh >/dev/null 2>&1 || { echo "  $(RED)✘ gh CLI not found$(RESET)  Install: brew install gh"; exit 1; }
 	@echo ""
@@ -464,6 +485,14 @@ clean:
 	  packages/*/node_modules \
 	  $(VENV)
 	@echo "  $(GREEN)✔ Cleaned$(RESET)"
+
+# ── Git Aliases ──────────────────────────────────────────────────────────────
+.PHONY: gundo
+gundo:
+	@echo "  Undoing last pushed commit (soft reset + force push)…"
+	git reset --soft HEAD~1
+	git push --force-with-lease
+	@echo "  $(GREEN)✔ Last commit undone — changes are staged$(RESET)"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 define require-env

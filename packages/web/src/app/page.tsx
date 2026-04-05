@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import AuroraBackground from '@/components/AuroraBackground';
 import SignInModal from '@/components/SignInModal';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import {
@@ -124,24 +125,46 @@ export default function HomePage() {
         <h2 className="text-sm font-semibold text-fg-muted uppercase tracking-wide text-center mb-10">
           How it works
         </h2>
-        <div className="grid md:grid-cols-3 gap-8 max-w-3xl mx-auto">
-          <Step
-            icon={<FileText size={22} />}
+        <div className="space-y-24 max-w-5xl mx-auto">
+          <StepShowcase
             number="1"
             title="Write vibes"
-            description="Describe features in plain-English markdown files. These are your source of truth — not code."
+            description="Describe features in plain-English markdown files with structured frontmatter. These are your source of truth — not code. VibeStudio gives you a dedicated editor with syntax highlighting, code peek, and a sidebar to navigate all your specs."
+            icon={<FileText size={22} />}
+            media={
+              <Image
+                src="/vibestudio-codepeek.png"
+                alt="VibeStudio IDE with code peek open"
+                width={720}
+                height={450}
+                className="rounded-xl"
+              />
+            }
+            imageRight
           />
-          <Step
-            icon={<Cpu size={22} />}
+          <StepShowcase
             number="2"
             title="AI compiles"
-            description="Our custom agentic AI reads your vibes and generates a complete, working implementation. Just choose your model."
+            description="Hit the Vibe button and our custom agentic AI reads your specs and generates a complete, working implementation. Choose your model, watch progress in real time, and iterate until it's right."
+            icon={<Cpu size={22} />}
+            media={<StepVideo src="/vibe.webm" />}
+            imageRight={false}
           />
-          <Step
-            icon={<GitPullRequest size={22} />}
+          <StepShowcase
             number="3"
             title="Review & ship"
-            description="Review changes at the intent level, not the code level. Merge when the spec is right."
+            description="Review changes at the intent level, not the code level. VibeHub shows you exactly what changed in your specs — the decisions, not the implementation details. Merge when the spec is right."
+            icon={<GitPullRequest size={22} />}
+            media={
+              <Image
+                src="/intent_diff.png"
+                alt="Intent-level diff showing spec changes"
+                width={720}
+                height={450}
+                className="rounded-xl"
+              />
+            }
+            imageRight
           />
         </div>
       </section>
@@ -255,28 +278,85 @@ export default function HomePage() {
 
 /* ── Sub-components ── */
 
-function Step({
-  icon,
+function StepShowcase({
   number,
   title,
   description,
+  icon,
+  media,
+  imageRight,
 }: {
-  icon: React.ReactNode;
   number: string;
   title: string;
   description: string;
+  icon: React.ReactNode;
+  media: React.ReactNode;
+  imageRight: boolean;
 }) {
-  return (
-    <div className="text-center">
-      <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-accent-subtle border border-border text-accent-emphasis mb-3">
-        {icon}
+  const ref = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) { setVisible(true); obs.disconnect(); } },
+      { threshold: 0.15 },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
+  const textBlock = (
+    <div className="flex flex-col justify-center">
+      <div className="inline-flex items-center gap-3 mb-4">
+        <div className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-accent-subtle border border-border text-accent-emphasis">
+          {icon}
+        </div>
+        <h3 className="text-xl font-semibold text-fg">
+          <span className="text-accent-emphasis mr-1">{number}.</span>
+          {title}
+        </h3>
       </div>
-      <h3 className="text-sm font-semibold text-fg mb-1">
-        <span className="text-accent-emphasis mr-1">{number}.</span>
-        {title}
-      </h3>
-      <p className="text-sm text-fg-muted leading-relaxed">{description}</p>
+      <p className="text-sm text-fg-muted leading-relaxed max-w-md">{description}</p>
     </div>
+  );
+
+  const mediaBlock = (
+    <div className="flex items-center justify-center">{media}</div>
+  );
+
+  return (
+    <div
+      ref={ref}
+      className={`grid md:grid-cols-2 gap-10 items-center transition-all duration-700 ease-out ${
+        visible
+          ? 'opacity-100 translate-y-0'
+          : `opacity-0 ${imageRight ? '-translate-x-8' : 'translate-x-8'}`
+      }`}
+    >
+      {imageRight ? (
+        <>{textBlock}{mediaBlock}</>
+      ) : (
+        <>{mediaBlock}{textBlock}</>
+      )}
+    </div>
+  );
+}
+
+function StepVideo({ src }: { src: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return null;
+  return (
+    <video
+      src={src}
+      autoPlay
+      loop
+      muted
+      playsInline
+      onError={() => setFailed(true)}
+      className="rounded-xl w-full"
+    />
   );
 }
 

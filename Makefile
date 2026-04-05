@@ -11,7 +11,7 @@ DC         := docker compose
 DC_RUN     := $(DC) run --rm
 
 # ── Apple Signing (public — embedded in every signed binary) ─────────────────
-APPLE_TEAM_ID        := SP9G9F6T6Q # your 10-char team ID (e.g. ABC1234DEF)
+APPLE_TEAM_ID        := SP9G9F6T6Q
 APPLE_SIGNING_IDENTITY := Developer ID Application: Isaac Smith ($(APPLE_TEAM_ID))
 
 # ── GCP Config ────────────────────────────────────────────────────────────────
@@ -396,10 +396,11 @@ build-desktop-signed:
 	@if [ -z "$(APPLE_TEAM_ID)" ]; then echo "  $(RED)✘ Set APPLE_TEAM_ID in Makefile first$(RESET)"; exit 1; fi
 	@hdiutil info 2>/dev/null | grep -B1 'VibeStudio' | grep '/dev/disk' | awk '{print $$1}' | sed 's/s[0-9]*$$//' | sort -u | while read dev; do hdiutil detach "$$dev" -force 2>/dev/null; done || true
 	@rm -f packages/desktop/src-tauri/target/release/bundle/macos/rw.*.dmg 2>/dev/null || true
-	@if [ -z "$$APPLE_ID" ]; then read -p "  Apple ID: " APPLE_ID; export APPLE_ID; fi; \
-	if [ -z "$$APPLE_PASSWORD" ]; then read -s -p "  App-specific password: " APPLE_PASSWORD; echo; export APPLE_PASSWORD; fi; \
-	APPLE_TEAM_ID="$(APPLE_TEAM_ID)" \
-	APPLE_SIGNING_IDENTITY="$(APPLE_SIGNING_IDENTITY)" \
+	@if [ -z "$$APPLE_ID" ]; then read -p "  Apple ID: " APPLE_ID; fi; \
+	if [ -z "$$APPLE_PASSWORD" ]; then read -s -p "  App-specific password: " APPLE_PASSWORD; echo; fi; \
+	export APPLE_ID APPLE_PASSWORD; \
+	export APPLE_TEAM_ID="$(APPLE_TEAM_ID)"; \
+	export APPLE_SIGNING_IDENTITY="$(APPLE_SIGNING_IDENTITY)"; \
 	$(NPM) run tauri build --workspace=packages/desktop
 	@echo "  $(GREEN)✔ Desktop build signed + notarized$(RESET)"
 	@echo "  Artifacts: packages/desktop/src-tauri/target/release/bundle/"

@@ -1,3 +1,5 @@
+import Image from 'next/image';
+
 export default function VibeStudioPage() {
   return (
     <div className="docs-content">
@@ -13,6 +15,13 @@ export default function VibeStudioPage() {
           the day-to-day workflow of writing specs, previewing generated code,
           and syncing with the web.
         </p>
+        <Image
+          src="/vibestudio-codepeek.png"
+          alt="VibeStudio IDE showing the spec editor with code peek open"
+          width={800}
+          height={500}
+          className="rounded-xl border border-border shadow-lg my-4"
+        />
         <p>
           VibeStudio is available for macOS.{' '}
           <a href="/download" className="text-accent-emphasis hover:underline">
@@ -25,27 +34,38 @@ export default function VibeStudioPage() {
       <Section title="Features">
         <FeatureCard
           title="Spec Editor"
-          description="Edit feature specs in a dedicated markdown editor with syntax highlighting for the .vibe frontmatter format (Uses, Data, Never)."
+          description="Edit feature specs in a dedicated markdown editor with syntax highlighting for the .vibe frontmatter format (Uses, Data, Never, Connects). The editor lives in the main panel — click any spec in the left sidebar to open it. Changes are saved automatically."
         />
         <FeatureCard
           title="Code Peek"
-          description="See the generated code alongside your spec. VibeStudio uses mapping.json to show you exactly which source files correspond to each feature."
+          description="Toggle Code Peek in the top bar to see the generated source files alongside your spec. VibeStudio reads mapping.json to resolve which files belong to each feature, so you can instantly see how your plain-English spec translates into working code."
+        />
+        <FeatureCard
+          title="Top Bar Abstractions"
+          description="The top bar surfaces the key abstractions from your spec — Data models, Uses (dependencies), and Never (constraints) — as clickable pills. This gives you an at-a-glance view of what a feature touches without scrolling through the markdown."
+        />
+        <Image
+          src="/topbar-abstractions.png"
+          alt="Top bar showing Data, Uses, and Never abstractions as pills"
+          width={800}
+          height={100}
+          className="rounded-lg border border-border shadow-sm my-2"
         />
         <FeatureCard
           title="Local Compile"
-          description="Run the AI compiler on your machine. Choose your model, compile, and see results in the output panel — without pushing to the cloud."
+          description="Click the Vibe button to run the AI compiler on your machine. Choose your model from the dropdown (Gemini, Claude, GPT), watch the four-phase progress (codegen → typecheck → tests → validation) in the output panel, and iterate without pushing to the cloud."
         />
         <FeatureCard
           title="Dev Server"
-          description="Start your project's dev server directly from VibeStudio. It reads project.json to determine the right command."
+          description="Start your project's dev server directly from VibeStudio by clicking the play button. It reads your project.json to determine the right command (npm run dev, etc.) and streams output in the bottom panel."
         />
         <FeatureCard
           title="Push & Pull"
-          description="Sync specs with VibeHub. Push creates an update (PR) on the web. Pull fetches the latest specs from the remote and commits them locally."
+          description="Sync specs with VibeHub using the push/pull buttons in the top bar. Push creates an update (like a PR) on the web for your team to review. Pull fetches the latest specs from the remote and commits them to your local .vibe/ directory."
         />
         <FeatureCard
           title="Chat Sidebar"
-          description="Ask the AI questions about your project, get suggestions for spec improvements, or debug compilation issues."
+          description="Open the chat panel to ask the AI questions about your project, get suggestions for spec improvements, or debug compilation issues. The chat is context-aware — it knows about your specs and generated code."
         />
       </Section>
 

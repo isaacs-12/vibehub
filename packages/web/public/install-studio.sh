@@ -42,8 +42,8 @@ install() {
   need curl
   need tar
 
-  TARBALL="VibeStudio-${VERSION_NUM}-macos.tar.gz"
-  URL="https://github.com/${REPO}/releases/download/${VERSION}/${TARBALL}"
+  TARBALL="VibeStudio-macos-arm64.tar.gz"
+  URL="https://github.com/${REPO}/releases/latest/download/${TARBALL}"
 
   TMPDIR="$(mktemp -d)"
   trap 'rm -rf "$TMPDIR"' EXIT

@@ -401,8 +401,22 @@ build-desktop-signed:
 	export APPLE_ID APPLE_PASSWORD; \
 	export APPLE_TEAM_ID="$(APPLE_TEAM_ID)"; \
 	export APPLE_SIGNING_IDENTITY="$(APPLE_SIGNING_IDENTITY)"; \
-	$(NPM) run tauri build --workspace=packages/desktop
-	@echo "  $(GREEN)✔ Desktop build signed + notarized$(RESET)"
+	$(NPM) run tauri build --workspace=packages/desktop && \
+	echo "  Verifying notarization…" && \
+	APP=$$(find packages/desktop/src-tauri/target/release/bundle/macos -name '*.app' | head -1) && \
+	if ! xcrun stapler validate "$$APP" >/dev/null 2>&1; then \
+		echo "  Stapling notarization ticket…"; \
+		xcrun stapler staple "$$APP"; \
+	fi && \
+	DMG=$$(find packages/desktop/src-tauri/target/release/bundle/dmg -name '*.dmg' | head -1) && \
+	if [ -n "$$DMG" ] && ! xcrun stapler validate "$$DMG" >/dev/null 2>&1; then \
+		echo "  Notarizing DMG…"; \
+		xcrun notarytool submit "$$DMG" \
+			--apple-id "$$APPLE_ID" --team-id "$(APPLE_TEAM_ID)" \
+			--password "$$APPLE_PASSWORD" --wait; \
+		xcrun stapler staple "$$DMG"; \
+	fi
+	@echo "  $(GREEN)✔ Desktop build signed + notarized + stapled$(RESET)"
 	@echo "  Artifacts: packages/desktop/src-tauri/target/release/bundle/"
 
 build-cli-all:
@@ -436,6 +450,7 @@ version-bump:
 		sed -i '' 's/"version": *"[^"]*"/"version": "$(VERSION)"/' $$f; \
 	done
 	@sed -i '' 's/"version": *"[^"]*"/"version": "$(VERSION)"/' packages/desktop/src-tauri/tauri.conf.json
+	@sed -i '' 's/^version = ".*"/version = "$(VERSION)"/' packages/desktop/src-tauri/Cargo.toml
 	@echo "  $(GREEN)✔ All manifests bumped to $(VERSION)$(RESET)"
 
 release: version-bump build-cli-all build-desktop-signed deploy-all
@@ -456,14 +471,17 @@ release: version-bump build-cli-all build-desktop-signed deploy-all
 		ASSETS="$$ASSETS $$f"; \
 		echo "  CLI: $$f"; \
 	done; \
-	DMG=$$(find packages/desktop/src-tauri/target/release/bundle/dmg -name '*.dmg' 2>/dev/null | head -1); \
-	if [ -n "$$DMG" ]; then ASSETS="$$ASSETS $$DMG"; echo "  Desktop: $$DMG"; fi; \
+	DMG_SRC=$$(find packages/desktop/src-tauri/target/release/bundle/dmg -name '*.dmg' 2>/dev/null | head -1); \
+	if [ -n "$$DMG_SRC" ]; then \
+		cp "$$DMG_SRC" VibeStudio-macos-arm64.dmg; \
+		ASSETS="$$ASSETS VibeStudio-macos-arm64.dmg"; \
+		echo "  Desktop: VibeStudio-macos-arm64.dmg"; \
+	fi; \
 	APP_PATH=$$(find packages/desktop/src-tauri/target/release/bundle/macos -name '*.app' 2>/dev/null | head -1); \
 	if [ -n "$$APP_PATH" ]; then \
-		TAR_NAME="VibeStudio-$(VERSION)-macos.tar.gz"; \
-		tar -czf "$$TAR_NAME" -C "$$(dirname $$APP_PATH)" "$$(basename $$APP_PATH)"; \
-		ASSETS="$$ASSETS $$TAR_NAME"; \
-		echo "  Desktop: $$TAR_NAME"; \
+		tar -czf VibeStudio-macos-arm64.tar.gz -C "$$(dirname $$APP_PATH)" "$$(basename $$APP_PATH)"; \
+		ASSETS="$$ASSETS VibeStudio-macos-arm64.tar.gz"; \
+		echo "  Desktop: VibeStudio-macos-arm64.tar.gz"; \
 	fi; \
 	if [ -z "$$ASSETS" ]; then echo "  $(RED)✘ No artifacts found$(RESET)"; exit 1; fi; \
 	gh release create "v$(VERSION)" $$ASSETS \
